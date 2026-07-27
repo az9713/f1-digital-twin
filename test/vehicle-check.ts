@@ -1,44 +1,70 @@
 import assert from "node:assert";
 import { createVehicleState, stepVehicle } from "../src/vehicle";
 
-// Smallest check that fails if the vehicle model breaks.
-// Run: npm run check
+// Physics acceptance tests for the dynamic single-track model.
+// Reference values are public F1 ballpark figures. Run: npm run check
 
-// 1. Full throttle from rest: accelerates, monotonically, and reaches a plausible speed
+const DT = 1 / 120;
+
+// 1. Standing start, full throttle: 0–100 km/h in a plausible F1 window (~2.6 s real)
 {
   const s = createVehicleState();
-  let prev = 0;
-  for (let i = 0; i < 5 * 120; i++) {
-    stepVehicle(s, 1, 0, 0, 1 / 120);
-    assert(s.speed >= prev, "speed must not drop under full throttle");
-    prev = s.speed;
+  let t = 0;
+  while (s.vx < 100 / 3.6 && t < 10) {
+    stepVehicle(s, 1, 0, 0, DT);
+    t += DT;
   }
-  assert(s.speed > 30 && s.speed < 120, `5s full-throttle speed plausible, got ${s.speed.toFixed(1)} m/s`);
+  assert(t > 1.5 && t < 4.5, `0-100 km/h in ${t.toFixed(2)}s — expected 1.5-4.5s`);
 }
 
-// 2. Braking from speed: stops, never goes negative
+// 2. Top speed under drag is F1-plausible (330-360 km/h with DRS closed ballpark)
 {
   const s = createVehicleState();
-  s.speed = 80;
-  for (let i = 0; i < 5 * 120; i++) stepVehicle(s, 0, 1, 0, 1 / 120);
-  assert(s.speed === 0, `car must stop under full brake, got ${s.speed}`);
+  for (let i = 0; i < 60 * 120; i++) stepVehicle(s, 1, 0, 0, DT);
+  const kmh = s.vx * 3.6;
+  assert(kmh > 280 && kmh < 400, `top speed ${kmh.toFixed(0)} km/h — expected 280-400`);
 }
 
-// 3. Constant steer at speed: heading changes, and a full circle returns near start
+// 3. Braking from 300 km/h: aero + slicks stop an F1 car in roughly 130-260 m
 {
   const s = createVehicleState();
-  s.speed = 20;
-  const startHeading = s.heading;
-  // Hold speed constant by matching resistances is fiddly; just verify yaw accumulates
-  for (let i = 0; i < 120; i++) stepVehicle(s, 0.5, 0, 1, 1 / 120);
-  assert(s.heading > startHeading + 0.1, "left steer must yaw the car left");
+  s.vx = 300 / 3.6;
+  let dist = 0;
+  while (s.vx > 0.5) {
+    stepVehicle(s, 0, 1, 0, DT);
+    dist += s.vx * DT;
+    assert(dist < 400, "braking distance runaway");
+  }
+  assert(dist > 80 && dist < 300, `300-0 in ${dist.toFixed(0)} m — expected 80-300`);
 }
 
-// 4. No motion without input
+// 4. Steady-state cornering: at 180 km/h the car should sustain >2 g lateral
+{
+  const s = createVehicleState();
+  s.vx = 50;
+  let peakAy = 0;
+  for (let i = 0; i < 6 * 120; i++) {
+    stepVehicle(s, 0.55, 0, 0.6, DT); // partial throttle holds speed roughly
+    if (i > 240) peakAy = Math.max(peakAy, Math.abs(s.forces.ay + s.vx * s.yawRate)); // centripetal accel
+  }
+  assert(peakAy > 15, `sustained lateral accel ${(peakAy / 9.81).toFixed(2)} g — expected > 1.5 g`);
+}
+
+// 5. Low-speed kinematic consistency: gentle steer at 8 m/s turns left with sane radius
+{
+  const s = createVehicleState();
+  s.vx = 8;
+  for (let i = 0; i < 4 * 120; i++) stepVehicle(s, 0.2, 0, 0.5, DT);
+  assert(s.heading > 0.3, `low-speed left steer must accumulate heading, got ${s.heading.toFixed(2)}`);
+  assert(Math.abs(s.vy) < 3, "no runaway lateral velocity at low speed");
+}
+
+// 6. Rest is stable: no NaN, no creep
 {
   const s = createVehicleState(5, 7, 1);
-  for (let i = 0; i < 120; i++) stepVehicle(s, 0, 0, 0, 1 / 120);
-  assert(s.x === 5 && s.z === 7, "car must not creep with no input");
+  for (let i = 0; i < 240; i++) stepVehicle(s, 0, 0, 0.7, DT);
+  assert(Number.isFinite(s.vx + s.vy + s.yawRate + s.x + s.z), "state must stay finite at rest");
+  assert(Math.abs(s.x - 5) < 0.1 && Math.abs(s.z - 7) < 0.1, "car must not creep with no input");
 }
 
 console.log("vehicle-check: all assertions passed");

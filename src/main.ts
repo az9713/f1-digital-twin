@@ -6,6 +6,7 @@ import { createVehicleState, stepVehicle } from "./vehicle";
 import { CameraRig } from "./cameras";
 import { loadSession } from "./session";
 import { Ghost } from "./ghost";
+import { ForceArrows } from "./forces";
 
 const app = document.getElementById("app")!;
 const speedEl = document.getElementById("speed-val")!;
@@ -66,6 +67,10 @@ async function init() {
   const input = new Input();
   const rig = new CameraRig(renderer);
   input.onCameraToggle = () => rig.toggle();
+  const arrows = new ForceArrows(scene);
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyF" && !e.repeat) arrows.toggle();
+  });
 
   const FIXED_DT = 1 / 120; // fixed-step sim, decoupled from render rate
   let accumulator = 0;
@@ -95,6 +100,7 @@ async function init() {
     sun.target.position.set(vehicle.x, 0, vehicle.z);
     sun.target.updateMatrixWorld();
 
+    arrows.update(vehicle);
     rig.update(vehicle, frameDt);
     speedEl.textContent = String(Math.round(vehicle.speed * 3.6));
     renderer.render(scene, rig.camera);
