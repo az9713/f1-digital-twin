@@ -52,6 +52,39 @@
       #ers-mode { color: #8b9bb4; margin-bottom: 5px; }
       #soc { height: 7px; background: #2a3444; border-radius: 4px; overflow: hidden; }
       #soc-bar { height: 100%; width: 80%; background: #22d3ee; }
+      #timing {
+        position: fixed; top: 12px; right: 20px;
+        background: rgba(20, 26, 34, 0.8); border: 1px solid #2a3444;
+        border-radius: 8px; padding: 10px 14px; user-select: none;
+        color: #e8eef7; font-size: 13px; line-height: 1.7; min-width: 170px;
+        font-variant-numeric: tabular-nums;
+      }
+      #timing .label { color: #8b9bb4; }
+      #delta { font-size: 20px; font-weight: 700; }
+      .overlay {
+        position: fixed; inset: 0; display: none;
+        background: rgba(5, 8, 12, 0.75); z-index: 10;
+        align-items: center; justify-content: center;
+      }
+      .overlay.open { display: flex; }
+      .panel {
+        background: #141a22; border: 1px solid #2a3444; border-radius: 12px;
+        padding: 22px 26px; color: #e8eef7; max-width: 720px;
+      }
+      .panel h2 { margin: 0 0 12px; font-size: 18px; }
+      .panel label { display: block; font-size: 12px; color: #8b9bb4; margin: 10px 0 3px; }
+      .panel input {
+        width: 100%; background: #1c2430; color: #e8eef7;
+        border: 1px solid #2a3444; border-radius: 6px; padding: 6px 9px; font-size: 13px;
+      }
+      .panel button {
+        background: #3b82f6; color: #fff; border: 0; border-radius: 6px;
+        padding: 8px 16px; margin: 14px 8px 0 0; cursor: pointer; font-weight: 600;
+      }
+      .panel button.alt { background: #2a3444; }
+      .panel .hint { font-size: 11px; color: #8b9bb4; margin-top: 6px; }
+      #strategy-chart { background: #0d1219; border: 1px solid #2a3444; border-radius: 8px; margin-top: 14px; }
+      #pit-panel button { min-width: 100px; }
     </style>
   </head>
   <body>
@@ -60,7 +93,7 @@
       <b>F1 Digital Twin — Phase 0</b><br />
       W/S throttle-brake · A/D steer<br />
       C camera (chase / onboard / free) · F force arrows<br />
-      E DRS · Q ERS mode
+      E DRS · Q ERS mode · P pit (when slow) · T strategy · R reset
     </div>
     <div id="speed"><span id="speed-val">0</span> <span>km/h</span></div>
     <div id="tires">
@@ -72,6 +105,40 @@
       <div id="drs">DRS</div>
       <div id="ers-mode">ERS: balanced</div>
       <div id="soc"><div id="soc-bar"></div></div>
+    </div>
+    <div id="timing">
+      <div><span class="label">Lap</span> <span id="lap-no">0</span>
+        &nbsp;<span class="label">Fuel</span> <span id="fuel">12</span><span class="label">kg</span></div>
+      <div><span class="label">Time</span> <span id="lap-cur">–:––.–––</span></div>
+      <div><span class="label">Last</span> <span id="lap-last">–:––.–––</span></div>
+      <div><span class="label">Best</span> <span id="lap-best">–:––.–––</span></div>
+      <div id="delta">±0.000</div>
+    </div>
+    <div class="overlay" id="pit-overlay">
+      <div class="panel" id="pit-panel">
+        <h2>Pit stop — choose compound</h2>
+        <p class="hint">Fresh tires start cold. Stop costs 24 s added to the current lap.</p>
+        <button data-compound="soft" style="background:#ef4444">Soft</button>
+        <button data-compound="medium" style="background:#d97706">Medium</button>
+        <button data-compound="hard" style="background:#64748b">Hard</button>
+        <button class="alt" id="pit-cancel">Stay out</button>
+      </div>
+    </div>
+    <div class="overlay" id="strategy-overlay">
+      <div class="panel">
+        <h2>Strategy Sandbox — race the tire model</h2>
+        <label>Race laps</label>
+        <input id="strat-laps" value="20" />
+        <label>Strategy A (compound:laps, …)</label>
+        <input id="strat-a" value="soft:8, hard:12" />
+        <label>Strategy B</label>
+        <input id="strat-b" value="medium:20" />
+        <p class="hint">Lap times come from the same thermal + wear model you drive on: cold out-laps, degradation, the cliff, fuel burn-off, 24 s pit loss.</p>
+        <button id="strat-run">Run race</button>
+        <button class="alt" id="strat-close">Close (T)</button>
+        <canvas id="strategy-chart" width="660" height="300"></canvas>
+        <div id="strat-result" class="hint"></div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

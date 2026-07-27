@@ -170,4 +170,34 @@ import { createErsState, stepErs, ERS } from "../src/ers";
   assert(stepErs(off, 1, 0, 60, DT) === 0, "off mode must not deploy");
 }
 
+// ---- Phase 5: strategy simulation ----
+import { simulateStrategy, parseStints } from "../src/strategy";
+
+// 14. Strategy sim: degradation raises lap times within a stint; pit loss lands on the stop lap
+{
+  const r = simulateStrategy("test", [{ compound: "soft", laps: 10 }, { compound: "hard", laps: 10 }], 82, 20);
+  assert(r.lapTimes.length === 20, "must simulate every lap");
+  const earlySoft = r.lapTimes[2];
+  const lateSoft = r.lapTimes[9];
+  assert(lateSoft > earlySoft, `soft must degrade: lap3 ${earlySoft.toFixed(2)} vs lap10 ${lateSoft.toFixed(2)}`);
+  assert(r.lapTimes[10] > r.lapTimes[9] + 15, "pit loss must land on the first lap of stint 2");
+  assert(r.total > 20 * 82 && r.total < 20 * 100, `total ${r.total.toFixed(0)}s must be plausible`);
+}
+
+// 15. Long-stint soft eventually loses to hard (the cliff makes one-stop vs no-stop a real decision)
+{
+  const softLong = simulateStrategy("soft", [{ compound: "soft", laps: 30 }], 82, 30);
+  const hardLong = simulateStrategy("hard", [{ compound: "hard", laps: 30 }], 82, 30);
+  const softLast5 = softLong.lapTimes.slice(-5).reduce((a, b) => a + b, 0);
+  const hardLast5 = hardLong.lapTimes.slice(-5).reduce((a, b) => a + b, 0);
+  assert(softLast5 > hardLast5, "worn soft must be slower than hard at the end of a long stint");
+}
+
+// 16. Stint parser
+{
+  assert(parseStints("soft:8, hard:12")!.length === 2, "valid stints must parse");
+  assert(parseStints("banana:5") === null, "invalid compound must fail");
+  assert(parseStints("") === null, "empty must fail");
+}
+
 console.log("vehicle-check: all assertions passed");

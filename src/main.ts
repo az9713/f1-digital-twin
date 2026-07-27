@@ -8,7 +8,11 @@ import { loadSession } from "./session";
 import { Ghost } from "./ghost";
 import { ForceArrows } from "./forces";
 import { createTireModel, stepTires, gripFactor, tempToColor } from "./tires";
-import { createErsState, stepErs, cycleErsMode, ERS } from "./ers";
+import { createErsState, stepErs, cycleErsMode, ERS, resetLap } from "./ers";
+import { Timing, fmtLap } from "./timing";
+import { setupOverlays } from "./ui";
+import { DEFAULT_PARAMS } from "./vehicle";
+import { COMPOUNDS } from "./tires";
 
 const app = document.getElementById("app")!;
 const speedEl = document.getElementById("speed-val")!;
@@ -73,9 +77,10 @@ async function init() {
   window.addEventListener("keydown", (e) => {
     if (e.code === "KeyF" && !e.repeat) arrows.toggle();
   });
-  const tires = createTireModel("medium");
+  let tires = createTireModel("medium");
   const tireFEl = document.getElementById("tire-f")!;
   const tireREl = document.getElementById("tire-r")!;
+  const compoundEl = document.getElementById("compound-label")!;
 
   const ers = createErsState();
   let drsWanted = false;
@@ -88,6 +93,34 @@ async function init() {
   const ersModeEl = document.getElementById("ers-mode")!;
   const drsEl = document.getElementById("drs")!;
 
+  // Phase 5: timing, fuel, pit, strategy
+  const timing = new Timing(trackCurve, session);
+  timing.timer.onLapComplete = () => resetLap(ers);
+  let fuel = 12; // kg — qualifying-style load; pit menu is where race fills would go
+  const params = { ...DEFAULT_PARAMS };
+  const ui = setupOverlays({
+    canPit: () => vehicle.speed < 5,
+    onCompound: (c) => {
+      tires = createTireModel(c);
+      compoundEl.textContent = COMPOUNDS[c].name;
+      timing.timer.lapTime += 24; // pit loss
+    },
+    baseLap: session ? session.meta.lap_time_s : 82,
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "KeyR" && !e.repeat) {
+      const p0 = trackCurve.getPointAt(0);
+      const t0 = trackCurve.getTangentAt(0);
+      Object.assign(vehicle, createVehicleState(p0.x, p0.z, Math.atan2(t0.x, t0.z)));
+    }
+  });
+  const lapNoEl = document.getElementById("lap-no")!;
+  const lapCurEl = document.getElementById("lap-cur")!;
+  const lapLastEl = document.getElementById("lap-last")!;
+  const lapBestEl = document.getElementById("lap-best")!;
+  const deltaEl = document.getElementById("delta")!;
+  const fuelEl = document.getElementById("fuel")!;
+
   const FIXED_DT = 1 / 120; // fixed-step sim, decoupled from render rate
   let accumulator = 0;
   let last = performance.now();
@@ -99,21 +132,28 @@ async function init() {
 
     accumulator += frameDt;
     while (accumulator >= FIXED_DT) {
+      if (ui.paused()) {
+        accumulator = 0;
+        break;
+      }
       input.update(FIXED_DT);
       // DRS closes itself under braking, steering, or low speed
       if (input.brake > 0.05 || Math.abs(input.steer) > 0.25 || vehicle.speed < 22) drsWanted = false;
       const boost = stepErs(ers, input.throttle, input.brake, vehicle.speed, FIXED_DT);
+      fuel = Math.max(0, fuel - input.throttle * 0.042 * FIXED_DT);
+      params.mass = DEFAULT_PARAMS.mass + fuel;
       stepVehicle(
         vehicle,
         { throttle: input.throttle, brake: input.brake, steer: input.steer, drs: drsWanted, powerBoost: boost },
         FIXED_DT,
-        undefined,
+        params,
         {
           front: gripFactor(tires.front, tires.compound),
           rear: gripFactor(tires.rear, tires.compound),
         }
       );
       stepTires(tires, vehicle, FIXED_DT);
+      timing.update(vehicle, FIXED_DT);
       ghost?.update(FIXED_DT);
       accumulator -= FIXED_DT;
     }
@@ -154,6 +194,21 @@ async function init() {
     socBarEl.style.background = ers.deploying ? "#f59e0b" : "#22d3ee";
     ersModeEl.textContent = `ERS: ${ers.mode}`;
     drsEl.style.opacity = drsWanted ? "1" : "0.25";
+
+    // Timing HUD
+    lapNoEl.textContent = String(timing.timer.lap);
+    lapCurEl.textContent = timing.timer.lap > 0 ? fmtLap(timing.timer.lapTime) : "–:––.–––";
+    lapLastEl.textContent = fmtLap(timing.timer.lastLap);
+    lapBestEl.textContent = fmtLap(timing.timer.bestLap);
+    fuelEl.textContent = fuel.toFixed(1);
+    const delta = timing.ghostDelta(vehicle);
+    if (delta === null) {
+      deltaEl.textContent = "±0.000";
+      deltaEl.style.color = "#8b9bb4";
+    } else {
+      deltaEl.textContent = `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}`;
+      deltaEl.style.color = delta <= 0 ? "#10b981" : "#ef4444";
+    }
 
     arrows.update(vehicle);
     rig.update(vehicle, frameDt);
