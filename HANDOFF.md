@@ -2,32 +2,35 @@
 
 ## Current state (2026-07-27)
 
-v1 **Phase 0 complete**: drivable placeholder car on an oval track in the browser.
+**v1 COMPLETE — Phases 0–6 all shipped.** Playable at https://az9713.github.io/f1-digital-twin/
+(deployed from `dist` to the `gh-pages` branch; redeploy = `npm run build` + push dist to gh-pages).
 
-- Stack: Vite 8 + TypeScript 6 + Three.js 0.185, vanilla-ts template.
-- `npm run dev` → drive with W/A/S/D, C cycles cameras. `npm run build` and `npm run check` both green.
-- Vehicle model is a **deliberate kinematic placeholder** (`src/vehicle.ts`, marked `ponytail:`) —
-  Phase 2 replaces it with the dynamic model behind the same `VehicleState` interface.
-- Car is procedural primitives (`src/car.ts`) — swap for a CC0 GLTF later; same `CarModel` interface.
-- Track centerline is an exported `CatmullRomCurve3` (`src/track.ts`) — reuse it for racing line / ghosts.
-- Test approach: single assert-based check (`test/vehicle-check.ts`) bundled with rolldown, run via
-  `npm run check`. No test framework by design; add cases to the same file.
+What exists: drivable dynamic single-track car (Pacejka + friction circle + load transfer),
+3-node tire thermal + wear with grip cliff, ride-height aero + DRS, ERS with SOC/modes,
+telemetry-fitted Monza track with Verstappen ghost + live delta, lap timing, pit stops,
+fuel burn, Strategy Sandbox (races the tire model), physics-notes page, QSS validation
+(+0.5% lap time vs real).
 
-## Next task
+- `npm run check` — 16 physics acceptance tests. `npm run validate` — QSS lap sim vs
+  OpenF1, writes docs/validation.md, gates at ±8%. Both green. `npm run build` green.
+- Tests bundle via rolldown (no test framework). Note: rolldown won't resolve entry paths
+  starting with `.check/` — keep test entries in `test/`.
+- Browser verification quirk: background tabs throttle rAF to ~1 fps, so drive-tests via
+  synthetic keydown show tiny speeds — physics is validated numerically instead.
 
-**Phase 1 — Telemetry ingestion (per v1 spec):**
-1. Python side (`data/` folder, new): FastF1 script that pulls one historical session
-   (suggest a Monza or Spa race lap) and bakes car position + speed + throttle/brake into
-   static JSON keyed by time.
-2. TS side: load the baked JSON, replay it as a translucent "ghost" car on a track fitted
-   to the telemetry's world coordinates (this will replace the placeholder oval —
-   keep the oval as a fallback).
-3. Decision made: two-language repo (Python baker → static JSON → browser). No live API calls
-   from the browser.
+## Next task (v2, per docs/three-ambitious-simulation-specs-v2.html)
 
-## Project decisions on record
+Milestone B — transient tires + multi-body: MF6 combined slip, relaxation lengths,
+ring thermal model, 6-DOF chassis + 4 corners on a physics worker at 1 kHz.
+Before that, worthwhile v1 polish candidates:
+1. DRS zone gating from track curvature (currently free toggle at speed)
+2. Brake force tune (300–0 in 91 m vs real ~140 m — soften brakeForceMax toward ~26 kN)
+3. Sector times + a proper mode menu (practice/quali fuel presets)
 
-- Strict v1 first (Phases 0–6), then v2 milestones (see specs in parent folder).
-- Repo pushed to GitHub (az9713/f1-digital-twin) every session.
-- Leaderboards/multiplayer: local-only until user asks for hosting.
-- Specs live in parent folder `grok_simulations/`; copies in `docs/` here.
+## Decisions on record
+
+- Strict v1 → v2 order (user). Repo public, pushed every session.
+- Leaderboards/multiplayer local-only until asked.
+- Strategy Sandbox uses analytical per-lap pricing on the real tire model rather than
+  AI-driven laps (v1 scope decision, noted in README).
+- OpenF1 coordinates are decimeters; Monza session_key 9590, driver 1, race lap 43.

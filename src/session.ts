@@ -20,7 +20,7 @@ export interface SessionData {
 
 export async function loadSession(name: string): Promise<SessionData | null> {
   try {
-    const r = await fetch(`/sessions/${name}.json`);
+    const r = await fetch(`${import.meta.env.BASE_URL}sessions/${name}.json`);
     if (!r.ok) return null;
     return (await r.json()) as SessionData;
   } catch {

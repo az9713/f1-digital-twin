@@ -1,43 +1,71 @@
 # F1 Digital Twin
 
-A real-time, browser-based digital twin of a Formula One car: rigorous-but-real-time physics
-(Pacejka tires, thermal model, aero, vehicle dynamics, ERS) rendered on a visible 3D car with
-force arrows, heat maps, and telemetry — validated against OpenF1/FastF1 data.
+A real-time, browser-based digital twin of a Formula One car. Every force is computed from
+first principles at 120 Hz and drawn on the car — Pacejka tires with a friction circle,
+a three-node tire thermal network with wear, ride-height-dependent aerodynamics with DRS,
+ERS energy flows — validated against real OpenF1 telemetry to **+0.5 % lap-time error**
+at Monza.
 
-Specs: `../three-ambitious-simulation-specs.html` (v1, current target) and
-`../three-ambitious-simulation-specs-v2.html` (v2, after v1 completes).
+**Play it:** https://az9713.github.io/f1-digital-twin/ (or `npm install && npm run dev`)
 
-## Run
+## The game
+
+You drive against the **ghost of Verstappen's fastest race lap** (Monza 2024, 1:21.745),
+fitted from real GPS + car telemetry. A live delta timer scores you against him at every
+meter of the lap.
+
+- `W/S` throttle & brake · `A/D` steer
+- `C` cameras (chase / onboard / free) · `F` force arrows
+- `E` DRS (auto-closes on brake/steer) · `Q` ERS mode (balanced / hotlap / harvest / off)
+- `P` pit stop when nearly stopped (compound change, 24 s loss, cold fresh tires)
+- `T` Strategy Sandbox · `R` reset to the line
+
+**Strategy Sandbox:** design two stint plans (`soft:8, hard:12` vs `medium:20`) and race
+them through the same tire thermal/wear model you drive on. Out-lap warm-up, degradation,
+the soft-tire cliff, fuel burn-off, and pit loss all emerge from the physics.
+
+## The physics
+
+All models documented with equations in the in-game **[Physics Notes](public/physics-notes.html)** page:
+
+| Model | Method |
+|---|---|
+| Vehicle dynamics | Dynamic single-track model, body-frame Newton–Euler, load transfer |
+| Tires (grip) | Pacejka Magic Formula lateral + friction-circle long/lat coupling |
+| Tires (thermal) | 3-node network (surface/bulk/carcass), speed-dependent convection |
+| Tires (wear) | Sliding-energy accumulation, overheat acceleration, grip cliff at 65 % |
+| Aero | Ride-height/rake maps, floor stall, DRS drag/load dump |
+| ERS | 120 kW MGU-K, 4 MJ store, per-lap deploy/harvest limits, 4 modes |
+| Strategy sim | Per-lap tire-state advance + grip/fuel lap-time pricing |
+
+## Validation
+
+`npm run validate` runs a quasi-steady-state lap simulation over the telemetry-fitted
+racing line with the game's exact vehicle parameters ([docs/validation.md](docs/validation.md)):
+
+| | Simulated | Real | Error |
+|---|---|---|---|
+| Lap time | 82.18 s | 81.745 s | **+0.5 %** |
+| Top speed | 334 km/h | 333 km/h | +0.3 % |
+| Track length | 5756 m | 5793 m | −0.6 % |
+
+`npm run check` runs 16 physics acceptance tests (0–100 in 2.4 s, 300–0 braking,
+sustained 3.4 g cornering, thermal windows, wear cliff, ERS budgets, strategy crossovers).
+
+## Data pipeline
+
+`data/bake_session.py` (Python stdlib only) pulls any session's fastest lap from the
+[OpenF1 API](https://openf1.org) — location + car data — and bakes it to static JSON:
 
 ```bash
-npm install
-npm run dev     # dev server
-npm run build   # type-check + production build
-npm run check   # vehicle-model self-check (assert-based, no framework)
+python data/bake_session.py 9590 1 monza-2024   # session_key driver out_name
 ```
 
-## Controls
+## Known simplifications (v1)
 
-- `W` / `S` — throttle / brake
-- `A` / `D` — steer
-- `C` — cycle camera: chase → onboard → free (drag to orbit)
+- Single-track (bicycle) model: no per-wheel loads, kerbs, or 3D suspension — v2 spec covers this
+- Track fitted from the driven racing line; chicane apex curvature is over-tight (−26 % on min speed)
+- DRS is free-toggle at speed rather than zone-gated; braking is ~30 % stronger than real
+- Strategy sim prices laps analytically instead of AI-driving them
 
-## Status — v1 Phase 0 (Foundations)
-
-- [x] Vite + TypeScript + Three.js scaffold
-- [x] Procedural placeholder F1 car (GLTF swap-in planned)
-- [x] Oval track from a reusable centerline curve
-- [x] Chase / onboard / free cameras
-- [x] Fixed-step (120 Hz) kinematic placeholder vehicle model
-- [ ] Phase 1: OpenF1 telemetry ingestion + ghost lap
-- [ ] Phase 2: dynamic bicycle model + Pacejka tires + force arrows
-
-See `HANDOFF.md` for the current working state and next task.
-
-## Architecture notes
-
-- `src/vehicle.ts` — vehicle state + step function. Phase 0 is a kinematic bicycle model;
-  Phase 2 replaces the internals behind the same `VehicleState` interface.
-- `src/track.ts` — track built from an exported `CatmullRomCurve3` centerline so later
-  phases (racing line, ghost replay) sample the same geometry.
-- Simulation runs at a fixed 120 Hz decoupled from render rate (accumulator loop in `main.ts`).
+Full v1/v2 specifications in [docs/](docs/).

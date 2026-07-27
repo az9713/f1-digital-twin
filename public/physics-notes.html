@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>F1 Digital Twin — Physics Notes</title>
+<style>
+  :root { --bg:#0b0f14; --surface:#141a22; --border:#2a3444; --text:#e8eef7; --muted:#8b9bb4; --red:#ef4444; --cyan:#22d3ee; --green:#10b981; --amber:#f59e0b; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:"Segoe UI",system-ui,sans-serif; line-height:1.65; }
+  .wrap { max-width:880px; margin:0 auto; padding:2.5rem 1.5rem 5rem; }
+  h1 { font-size:1.9rem; margin-bottom:.4rem; }
+  .sub { color:var(--muted); margin-bottom:2rem; }
+  h2 { font-size:1.25rem; margin:2.2rem 0 .7rem; color:#fca5a5; border-left:4px solid var(--red); padding-left:.6rem; }
+  p, li { color:#c5d0e0; margin-bottom:.8rem; }
+  ul { margin:.4rem 0 1rem 1.4rem; }
+  .eq { font-family:"Latin Modern Math","Times New Roman",serif; background:#0d1219; border:1px solid var(--border); border-radius:8px; padding:.8rem 1.1rem; margin:.8rem 0; overflow-x:auto; font-size:1.05rem; }
+  .see { background:#0f1a14; border:1px solid #14532d; border-radius:8px; padding:.7rem 1rem; margin:.8rem 0; font-size:.92rem; }
+  .see b { color:#4ade80; }
+  code { background:#1e293b; border-radius:4px; padding:.1em .35em; color:#7dd3fc; font-size:.9em; }
+  table { border-collapse:collapse; margin:.8rem 0; font-size:.92rem; }
+  td, th { border:1px solid var(--border); padding:.45rem .8rem; text-align:left; }
+  th { background:var(--surface); color:#cbd5e1; }
+  a { color:var(--cyan); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Physics Notes</h1>
+  <p class="sub">Every model in the F1 Digital Twin, the equation it solves, and where to see it on the car. Nothing on screen is faked: arrows, colors, and timers are read out of the same state the simulation integrates at 120 Hz.</p>
+
+  <h2>1 · Vehicle dynamics — the single-track model</h2>
+  <p>The chassis is a rigid body with three planar degrees of freedom: forward speed v<sub>x</sub>, lateral speed v<sub>y</sub>, and yaw rate r. The four wheels are lumped into one front and one rear axle (a "bicycle"). Newton–Euler in the body frame:</p>
+  <div class="eq">
+    m(v̇<sub>x</sub> − v<sub>y</sub>r) = F<sub>xR</sub> + F<sub>xF</sub>cos δ − F<sub>yF</sub>sin δ − F<sub>drag</sub> − F<sub>roll</sub><br/>
+    m(v̇<sub>y</sub> + v<sub>x</sub>r) = F<sub>yF</sub>cos δ + F<sub>yR</sub> + F<sub>xF</sub>sin δ<br/>
+    I<sub>zz</sub> ṙ = a(F<sub>yF</sub>cos δ + F<sub>xF</sub>sin δ) − b F<sub>yR</sub>
+  </div>
+  <p>δ is the steering angle at the front wheels, a and b the distances from the center of gravity to each axle. Braking shifts vertical load forward (m·a<sub>x</sub>·h/L), which is why the rear goes light — and loose — under heavy braking.</p>
+  <div class="see"><b>See it:</b> press <code>F</code> — purple arrows are axle lateral forces, green is drive/brake, orange is drag, cyan is downforce pressing the car down.</div>
+
+  <h2>2 · Tires — the Pacejka "Magic Formula"</h2>
+  <p>Each axle's lateral force comes from the slip angle α — the difference between where the tire points and where it travels:</p>
+  <div class="eq">
+    α<sub>F</sub> = atan((v<sub>y</sub> + a·r)/v<sub>x</sub>) − δ &nbsp;&nbsp;&nbsp; α<sub>R</sub> = atan((v<sub>y</sub> − b·r)/v<sub>x</sub>)<br/>
+    F<sub>y</sub> = −D sin(C atan(Bα − E(Bα − atan Bα))), &nbsp; D = μF<sub>z</sub>
+  </div>
+  <p>Force rises almost linearly with slip, peaks near 6–8°, then falls — that falling side is a slide. Longitudinal and lateral demands share one budget (the <em>friction circle</em>): using the tires to brake steals exactly the grip you wanted for turning:</p>
+  <div class="eq">(F<sub>x</sub>/μF<sub>z</sub>)² + (F<sub>y</sub>/μF<sub>z</sub>)² ≤ 1</div>
+  <div class="see"><b>See it:</b> trail-brake into Turn 1 — the purple front arrow shrinks while you brake hard, and grows as you release. That is the friction circle trading braking for turning.</div>
+
+  <h2>3 · Tire temperature — a three-node thermal network</h2>
+  <p>Each axle's tire is three coupled heat stores: a thin <em>surface</em> (tread face), the rubber <em>bulk</em>, and the <em>carcass</em>. Sliding friction pumps heat into the surface; airflow removes it at a rate proportional to speed:</p>
+  <div class="eq">
+    C<sub>s</sub>Ṫ<sub>s</sub> = P<sub>slide</sub> − h<sub>s</sub>(v)(T<sub>s</sub>−T<sub>air</sub>) − k<sub>sb</sub>(T<sub>s</sub>−T<sub>b</sub>) − k<sub>track</sub>(T<sub>s</sub>−T<sub>track</sub>)<br/>
+    C<sub>b</sub>Ṫ<sub>b</sub> = k<sub>sb</sub>(T<sub>s</sub>−T<sub>b</sub>) − k<sub>bc</sub>(T<sub>b</sub>−T<sub>c</sub>) &nbsp;&nbsp; C<sub>c</sub>Ṫ<sub>c</sub> = k<sub>bc</sub>(T<sub>b</sub>−T<sub>c</sub>) − h<sub>c</sub>(v)(T<sub>c</sub>−T<sub>air</sub>)
+  </div>
+  <p>Grip depends on bulk temperature through a Gaussian window around each compound's optimum (soft ≈ 95 °C, hard ≈ 105 °C). Cold tires keep only ~72 % of peak grip — the out-lap is slow for a physical reason. Wear accumulates with sliding energy, faster when the surface overheats; past 65 % wear the grip falls off a cliff.</p>
+  <div class="see"><b>See it:</b> wheel color and the bottom-left widget (blue→green→yellow→red). Do three hard laps on softs and watch the wear bar amber, then the lap times fall away.</div>
+
+  <h2>4 · Aerodynamics — ride height, rake, DRS</h2>
+  <p>Downforce and drag scale with dynamic pressure ½ρv², through areas C<sub>L</sub>A and C<sub>D</sub>A that depend on ride height: run the floor lower and it works harder (~1.6 % load per mm), until below ~25 mm it stalls. Rake (rear height − front) shifts the aero balance forward. DRS opens the rear wing: ~12 % less drag, ~0.9 m² of C<sub>L</sub>A dumped.</p>
+  <div class="eq">F<sub>down</sub> = ½ρ C<sub>L</sub>A(h<sub>F</sub>,h<sub>R</sub>,DRS) v² &nbsp;&nbsp;&nbsp; F<sub>drag</sub> = ½ρ C<sub>D</sub>A(h,DRS) v²</div>
+  <p>At 335 km/h the model's downforce is ≈ 2.6× the car's weight — this is why braking from top speed can exceed 5 g while a road car manages 1.</p>
+  <div class="see"><b>See it:</b> the cyan downforce arrow grows with the square of speed. Open DRS (<code>E</code>) on the straight: top speed rises ~15 km/h; brake or steer and it snaps shut.</div>
+
+  <h2>5 · ERS — the energy budget</h2>
+  <p>The MGU-K moves energy between the rear axle and a 4 MJ battery at up to 120 kW, both ways. Braking harvests (≤ 2 MJ/lap into the store), full throttle deploys (≤ 4 MJ/lap out). Modes: <em>balanced</em> guards a 30 % reserve, <em>hotlap</em> spends everything, <em>harvest</em> only collects.</p>
+  <div class="eq">SOĊ = P<sub>harvest</sub> − P<sub>deploy</sub>, &nbsp; |P| ≤ 120 kW, &nbsp; E<sub>deploy,lap</sub> ≤ 4 MJ</div>
+  <div class="see"><b>See it:</b> the battery bar top-right of the tire widget — cyan while harvesting under braking, amber while deploying. Cycle modes with <code>Q</code>.</div>
+
+  <h2>6 · Strategy — racing the tire model</h2>
+  <p>The Strategy Sandbox (<code>T</code>) races two stint plans through the same thermal + wear model you drive on. Each simulated lap advances the tire state with a representative load profile, then prices the lap:</p>
+  <div class="eq">t<sub>lap</sub> = t<sub>base</sub> + k<sub>grip</sub>(g<sub>ref</sub> − g(T, wear)) + k<sub>fuel</sub>m<sub>fuel</sub> (+ 24 s pit)</div>
+  <p>Cold out-laps, degradation slopes, the soft-tire cliff, and fuel burn-off all emerge from the model — the crossover lap where a one-stop beats a no-stop is a computed result, not a script.</p>
+
+  <h2>7 · Validation against reality</h2>
+  <p>The track is fitted from OpenF1 GPS of Verstappen's fastest race lap at Monza 2024; the car parameters are public-ballpark figures, not fitted to the lap. A quasi-steady-state lap simulation with exactly the game's parameters gives:</p>
+  <table>
+    <tr><th>Quantity</th><th>Simulated</th><th>Real</th><th>Error</th></tr>
+    <tr><td>Lap time</td><td>82.18 s</td><td>81.745 s</td><td>+0.5 %</td></tr>
+    <tr><td>Top speed</td><td>334 km/h</td><td>333 km/h</td><td>+0.3 %</td></tr>
+    <tr><td>Slowest corner</td><td>55 km/h</td><td>74 km/h</td><td>−26 % *</td></tr>
+    <tr><td>Track length</td><td>5756 m</td><td>5793 m</td><td>−0.6 %</td></tr>
+  </table>
+  <p>* The fitted centerline over-tightens the chicane apexes (GPS smoothing) — a geometry artifact, honestly kept. Full method: <code>npm run validate</code>, report in <code>docs/validation.md</code>.</p>
+
+  <p style="margin-top:2.5rem"><a href="./">← back to the car</a></p>
+</div>
+</body>
+</html>
