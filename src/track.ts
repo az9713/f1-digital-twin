@@ -48,7 +48,7 @@ export function createTrack(scene: THREE.Scene): THREE.CatmullRomCurve3 {
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  const asphalt = new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.95 });
+  const asphalt = new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.95, side: THREE.DoubleSide });
   const ribbon = new THREE.Mesh(geo, asphalt);
   ribbon.receiveShadow = true;
   scene.add(ribbon);
