@@ -1,0 +1,20 @@
+{
+  "name": "f1-digital-twin",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "check": "rolldown test/vehicle-check.ts --file .check/vehicle-check.mjs --format esm --platform node && node .check/vehicle-check.mjs"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1"
+  },
+  "dependencies": {
+    "three": "^0.185.1"
+  }
+}
