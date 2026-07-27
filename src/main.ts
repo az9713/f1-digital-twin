@@ -7,6 +7,7 @@ import { CameraRig } from "./cameras";
 import { loadSession } from "./session";
 import { Ghost } from "./ghost";
 import { ForceArrows } from "./forces";
+import { createTireModel, stepTires, gripFactor, tempToColor } from "./tires";
 
 const app = document.getElementById("app")!;
 const speedEl = document.getElementById("speed-val")!;
@@ -71,6 +72,9 @@ async function init() {
   window.addEventListener("keydown", (e) => {
     if (e.code === "KeyF" && !e.repeat) arrows.toggle();
   });
+  const tires = createTireModel("medium");
+  const tireFEl = document.getElementById("tire-f")!;
+  const tireREl = document.getElementById("tire-r")!;
 
   const FIXED_DT = 1 / 120; // fixed-step sim, decoupled from render rate
   let accumulator = 0;
@@ -84,7 +88,11 @@ async function init() {
     accumulator += frameDt;
     while (accumulator >= FIXED_DT) {
       input.update(FIXED_DT);
-      stepVehicle(vehicle, input.throttle, input.brake, input.steer, FIXED_DT);
+      stepVehicle(vehicle, input.throttle, input.brake, input.steer, FIXED_DT, undefined, {
+        front: gripFactor(tires.front, tires.compound),
+        rear: gripFactor(tires.rear, tires.compound),
+      });
+      stepTires(tires, vehicle, FIXED_DT);
       ghost?.update(FIXED_DT);
       accumulator -= FIXED_DT;
     }
@@ -99,6 +107,26 @@ async function init() {
     sun.position.set(vehicle.x + 120, 180, vehicle.z + 80);
     sun.target.position.set(vehicle.x, 0, vehicle.z);
     sun.target.updateMatrixWorld();
+
+    // Tire heat tint on the 3D wheels (front = wheels 0,1 / rear = 2,3)
+    const [rf, gf, bf] = tempToColor(tires.front.tSurface);
+    const [rr, gr, br] = tempToColor(tires.rear.tSurface);
+    (car.wheels[0].material as THREE.MeshStandardMaterial).color.setRGB(rf * 0.6, gf * 0.6, bf * 0.6);
+    (car.wheels[1].material as THREE.MeshStandardMaterial).color.setRGB(rf * 0.6, gf * 0.6, bf * 0.6);
+    (car.wheels[2].material as THREE.MeshStandardMaterial).color.setRGB(rr * 0.6, gr * 0.6, br * 0.6);
+    (car.wheels[3].material as THREE.MeshStandardMaterial).color.setRGB(rr * 0.6, gr * 0.6, br * 0.6);
+
+    // HUD tire widget
+    const updateTile = (el: HTMLElement, t: { tSurface: number; wear: number }) => {
+      const [r, g, b] = tempToColor(t.tSurface);
+      el.style.borderColor = `rgb(${r * 255},${g * 255},${b * 255})`;
+      (el.querySelector(".t") as HTMLElement).textContent = `${Math.round(t.tSurface)}°`;
+      const bar = el.querySelector(".w div") as HTMLElement;
+      bar.style.width = `${Math.max(0, (1 - t.wear) * 100)}%`;
+      bar.style.background = t.wear > 0.65 ? "#ef4444" : t.wear > 0.4 ? "#f59e0b" : "#10b981";
+    };
+    updateTile(tireFEl, tires.front);
+    updateTile(tireREl, tires.rear);
 
     arrows.update(vehicle);
     rig.update(vehicle, frameDt);

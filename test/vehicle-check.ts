@@ -67,4 +67,49 @@ const DT = 1 / 120;
   assert(Math.abs(s.x - 5) < 0.1 && Math.abs(s.z - 7) < 0.1, "car must not creep with no input");
 }
 
+// ---- Phase 3: tire thermal + wear ----
+import { createTireModel, stepTires, gripFactor, COMPOUNDS } from "../src/tires";
+
+// 7. Sustained cornering warms tires into the working window; wear accumulates
+{
+  const s = createVehicleState();
+  s.vx = 45;
+  const tires = createTireModel("soft");
+  const t0 = tires.front.tBulk;
+  for (let i = 0; i < 60 * 120; i++) {
+    stepVehicle(s, 0.5, 0, 0.5, DT, undefined, {
+      front: gripFactor(tires.front, tires.compound),
+      rear: gripFactor(tires.rear, tires.compound),
+    });
+    stepTires(tires, s, DT);
+  }
+  assert(tires.front.tBulk > t0 + 15, `cornering must heat tires: ${t0}→${tires.front.tBulk.toFixed(0)}°C`);
+  assert(tires.front.tSurface < 200, `surface temp must stay physical: ${tires.front.tSurface.toFixed(0)}°C`);
+  assert(tires.front.wear > 0.001 && tires.front.wear < 0.6, `1 min hard cornering wear ${(tires.front.wear * 100).toFixed(1)}% — expected 0.1-60%`);
+}
+
+// 8. Straight-line airflow cools an overheated tire (the "cooling lap" effect),
+//    and it can never cool below ambient
+{
+  const s = createVehicleState();
+  s.vx = 50;
+  s.speed = 50; // stepTires reads s.speed for airflow
+  const tires = createTireModel("medium");
+  tires.front.tSurface = tires.front.tBulk = tires.front.tCarcass = 115;
+  for (let i = 0; i < 60 * 120; i++) stepTires(tires, s, DT);
+  assert(tires.front.tSurface < 95, `60s at speed must cool the surface, got ${tires.front.tSurface.toFixed(0)}°C`);
+  assert(tires.front.tSurface > 25, "tire cannot cool below ambient");
+}
+
+// 9. Grip peaks near the compound's optimal temperature and degrades off-peak + worn
+{
+  const c = COMPOUNDS.medium;
+  const at = (tBulk: number, wear = 0) => gripFactor({ tSurface: tBulk, tBulk, tCarcass: tBulk, wear }, c);
+  assert(at(c.tOpt) > at(50), "warm tire must out-grip cold tire");
+  assert(at(c.tOpt) > at(c.tOpt + 60), "overheated tire must lose grip");
+  assert(at(c.tOpt, 0.9) < at(c.tOpt, 0) * 0.85, "worn tire past the cliff must lose >15% grip");
+  assert(COMPOUNDS.soft.gripPeak > COMPOUNDS.hard.gripPeak, "soft must out-grip hard");
+  assert(COMPOUNDS.soft.wearRate > COMPOUNDS.hard.wearRate, "soft must wear faster than hard");
+}
+
 console.log("vehicle-check: all assertions passed");

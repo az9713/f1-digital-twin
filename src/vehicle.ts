@@ -86,13 +86,19 @@ function pacejkaLateral(alpha: number, fz: number, mu: number): number {
   return -D * Math.sin(C * Math.atan(B * alpha - E * (B * alpha - Math.atan(B * alpha))));
 }
 
+export interface GripScale {
+  front: number;
+  rear: number;
+}
+
 export function stepVehicle(
   s: VehicleState,
   throttle: number,
   brake: number,
   steer: number,
   dt: number,
-  p: VehicleParams = DEFAULT_PARAMS
+  p: VehicleParams = DEFAULT_PARAMS,
+  grip: GripScale = { front: 1, rear: 1 }
 ) {
   const L = p.a + p.b;
   // Speed-sensitive steering so full lock is usable in slow corners but not at 300 km/h
@@ -121,8 +127,10 @@ export function stepVehicle(
 
   // Friction circle per axle: longitudinal demand is capped by mu*Fz, and what is
   // used longitudinally shrinks the lateral capacity.
-  const capF = p.mu * fzF;
-  const capR = p.mu * fzR;
+  const muF = p.mu * grip.front;
+  const muR = p.mu * grip.rear;
+  const capF = muF * fzF;
+  const capR = muR * fzR;
   fxFront = Math.max(-capF, Math.min(capF, fxFront));
   fxRear = Math.max(-capR, Math.min(capR, fxRear));
   const latScaleF = Math.sqrt(Math.max(0.05, 1 - (fxFront / (capF || 1)) ** 2));
@@ -132,8 +140,8 @@ export function stepVehicle(
   const vxSafe = Math.max(s.vx, 0.5);
   const alphaF = Math.atan2(s.vy + p.a * s.yawRate, vxSafe) - delta;
   const alphaR = Math.atan2(s.vy - p.b * s.yawRate, vxSafe);
-  const fyF = pacejkaLateral(alphaF, fzF, p.mu) * latScaleF;
-  const fyR = pacejkaLateral(alphaR, fzR, p.mu) * latScaleR;
+  const fyF = pacejkaLateral(alphaF, fzF, muF) * latScaleF;
+  const fyR = pacejkaLateral(alphaR, fzR, muR) * latScaleR;
 
   // Rolling resistance
   const roll = 0.015 * weight * Math.sign(s.vx);

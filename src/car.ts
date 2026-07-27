@@ -80,7 +80,7 @@ export function createCar(): CarModel {
     // Pivot group so front wheels can steer around Y while the mesh spins around X
     const pivot = new THREE.Group();
     pivot.position.set(x, WHEEL_RADIUS, z);
-    const wheel = new THREE.Mesh(wheelGeo, tireMat);
+    const wheel = new THREE.Mesh(wheelGeo, tireMat.clone()); // own material → per-axle heat tint
     pivot.add(wheel);
     root.add(pivot);
     wheels.push(wheel);
