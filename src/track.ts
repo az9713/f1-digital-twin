@@ -24,9 +24,19 @@ export function createCenterline(): THREE.CatmullRomCurve3 {
   return new THREE.CatmullRomCurve3(pts, true, "catmullrom", 0.1);
 }
 
-export function createTrack(scene: THREE.Scene): THREE.CatmullRomCurve3 {
-  const curve = createCenterline();
-  const n = 400;
+/** Fit a closed centerline to a telemetry lap trace (racing-line approximation). */
+export function centerlineFromLap(xs: number[], zs: number[]): THREE.CatmullRomCurve3 {
+  const pts: THREE.Vector3[] = [];
+  const stride = 8; // ~0.8 s between control points smooths GPS noise
+  for (let i = 0; i < xs.length - stride; i += stride) {
+    pts.push(new THREE.Vector3(xs[i], 0, zs[i]));
+  }
+  return new THREE.CatmullRomCurve3(pts, true, "catmullrom", 0.5);
+}
+
+export function createTrack(scene: THREE.Scene, curve?: THREE.CatmullRomCurve3): THREE.CatmullRomCurve3 {
+  curve = curve ?? createCenterline();
+  const n = 800;
 
   // Track ribbon as a triangle strip
   const positions: number[] = [];
@@ -84,7 +94,7 @@ export function createTrack(scene: THREE.Scene): THREE.CatmullRomCurve3 {
 
   // Grass plane
   const grass = new THREE.Mesh(
-    new THREE.PlaneGeometry(1200, 1200),
+    new THREE.PlaneGeometry(8000, 8000),
     new THREE.MeshStandardMaterial({ color: 0x14351c, roughness: 1 })
   );
   grass.rotation.x = -Math.PI / 2;
