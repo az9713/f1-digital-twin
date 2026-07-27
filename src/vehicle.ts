@@ -16,10 +16,11 @@ export interface VehicleParams {
   brakeForceMax: number; // N, total at the pedal
   brakeBias: number; // fraction front
   mu: number; // tire friction coefficient (slicks, in temperature window)
-  // ponytail: constant aero for Phase 2 — Phase 4 replaces with ride-height maps + DRS
-  cdA: number; // drag area, m²
-  clA: number; // downforce area, m²
-  aeroBalance: number; // fraction of downforce on front axle
+  cdA: number; // drag area at reference ride height, m²
+  clA: number; // downforce area at reference ride height, m²
+  aeroBalance: number; // fraction of downforce on front axle at zero rake delta
+  rideHeightF: number; // mm, front (reference 35)
+  rideHeightR: number; // mm, rear (reference 45)
 }
 
 export const DEFAULT_PARAMS: VehicleParams = {
@@ -35,7 +36,41 @@ export const DEFAULT_PARAMS: VehicleParams = {
   cdA: 1.5,
   clA: 4.8,
   aeroBalance: 0.44,
+  rideHeightF: 35,
+  rideHeightR: 45,
 };
+
+/**
+ * Ground-effect era aero map: lower ride height → more downforce (until the
+ * floor bottoms out), higher ride → less load, slightly more drag from the
+ * exposed floor. Rake (rear − front) shifts balance forward. DRS dumps rear
+ * wing load and drag.
+ */
+export function aeroCoeffs(p: VehicleParams, drs: boolean): { cdA: number; clA: number; balance: number } {
+  const hF = p.rideHeightF;
+  const hR = p.rideHeightR;
+  const hAvg = (hF + hR) / 2;
+  // ~1.6% downforce lost per mm of average ride height above reference 40 mm
+  let clA = p.clA * (1 - 0.016 * (hAvg - 40));
+  // Floor stall when running dangerously low: sudden loss below 25 mm front
+  if (hF < 25) clA *= 0.82;
+  let cdA = p.cdA * (1 + 0.004 * (hAvg - 40));
+  // Rake shifts aero balance: +0.4% front per mm of extra rake vs reference 10 mm
+  const balance = Math.min(0.55, Math.max(0.3, p.aeroBalance + 0.004 * (hR - hF - 10)));
+  if (drs) {
+    cdA *= 0.88; // ~12% drag cut
+    clA -= 0.9; // rear wing load dumped
+  }
+  return { cdA, clA: Math.max(1, clA), balance: drs ? Math.min(0.62, balance + 0.08) : balance };
+}
+
+export interface Controls {
+  throttle: number; // 0..1
+  brake: number; // 0..1
+  steer: number; // -1..1, left positive
+  drs?: boolean;
+  powerBoost?: number; // W, e.g. ERS deployment
+}
 
 const RHO = 1.2; // air density kg/m³
 const G = 9.81;
@@ -93,13 +128,12 @@ export interface GripScale {
 
 export function stepVehicle(
   s: VehicleState,
-  throttle: number,
-  brake: number,
-  steer: number,
+  u: Controls,
   dt: number,
   p: VehicleParams = DEFAULT_PARAMS,
   grip: GripScale = { front: 1, rear: 1 }
 ) {
+  const { throttle, brake, steer } = u;
   const L = p.a + p.b;
   // Speed-sensitive steering so full lock is usable in slow corners but not at 300 km/h
   s.steerAngle = (steer * MAX_STEER) / (1 + s.vx / 18);
@@ -107,19 +141,21 @@ export function stepVehicle(
 
   const v = Math.hypot(s.vx, s.vy);
   const qDyn = 0.5 * RHO * v * v;
-  const drag = p.cdA * qDyn;
-  const downforce = p.clA * qDyn;
+  const aero = aeroCoeffs(p, u.drs ?? false);
+  const drag = aero.cdA * qDyn;
+  const downforce = aero.clA * qDyn;
 
   // Axle vertical loads: static + aero + longitudinal transfer (from last step's ax)
   const axPrev = s.forces.ax;
   const weight = p.mass * G;
-  let fzF = (weight * p.b) / L + downforce * p.aeroBalance - (p.mass * axPrev * p.hCg) / L;
-  let fzR = (weight * p.a) / L + downforce * (1 - p.aeroBalance) + (p.mass * axPrev * p.hCg) / L;
+  let fzF = (weight * p.b) / L + downforce * aero.balance - (p.mass * axPrev * p.hCg) / L;
+  let fzR = (weight * p.a) / L + downforce * (1 - aero.balance) + (p.mass * axPrev * p.hCg) / L;
   fzF = Math.max(0, fzF);
   fzR = Math.max(0, fzR);
 
   // Longitudinal tire forces: power-limited RWD drive minus brakes, split by bias
-  const driveAvail = throttle * (s.vx > 1 ? p.powerMax / s.vx : p.powerMax);
+  const power = p.powerMax + (u.powerBoost ?? 0);
+  const driveAvail = throttle * (s.vx > 1 ? power / s.vx : power);
   const brakeF = brake * p.brakeForceMax * p.brakeBias * (s.vx > 0.1 ? 1 : 0);
   const brakeR = brake * p.brakeForceMax * (1 - p.brakeBias) * (s.vx > 0.1 ? 1 : 0);
   let fxFront = -brakeF;

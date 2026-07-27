@@ -11,7 +11,7 @@ const DT = 1 / 120;
   const s = createVehicleState();
   let t = 0;
   while (s.vx < 100 / 3.6 && t < 10) {
-    stepVehicle(s, 1, 0, 0, DT);
+    stepVehicle(s, { throttle: 1, brake: 0, steer: 0 }, DT);
     t += DT;
   }
   assert(t > 1.5 && t < 4.5, `0-100 km/h in ${t.toFixed(2)}s — expected 1.5-4.5s`);
@@ -20,7 +20,7 @@ const DT = 1 / 120;
 // 2. Top speed under drag is F1-plausible (330-360 km/h with DRS closed ballpark)
 {
   const s = createVehicleState();
-  for (let i = 0; i < 60 * 120; i++) stepVehicle(s, 1, 0, 0, DT);
+  for (let i = 0; i < 60 * 120; i++) stepVehicle(s, { throttle: 1, brake: 0, steer: 0 }, DT);
   const kmh = s.vx * 3.6;
   assert(kmh > 280 && kmh < 400, `top speed ${kmh.toFixed(0)} km/h — expected 280-400`);
 }
@@ -31,7 +31,7 @@ const DT = 1 / 120;
   s.vx = 300 / 3.6;
   let dist = 0;
   while (s.vx > 0.5) {
-    stepVehicle(s, 0, 1, 0, DT);
+    stepVehicle(s, { throttle: 0, brake: 1, steer: 0 }, DT);
     dist += s.vx * DT;
     assert(dist < 400, "braking distance runaway");
   }
@@ -44,7 +44,7 @@ const DT = 1 / 120;
   s.vx = 50;
   let peakAy = 0;
   for (let i = 0; i < 6 * 120; i++) {
-    stepVehicle(s, 0.55, 0, 0.6, DT); // partial throttle holds speed roughly
+    stepVehicle(s, { throttle: 0.55, brake: 0, steer: 0.6 }, DT); // partial throttle holds speed roughly
     if (i > 240) peakAy = Math.max(peakAy, Math.abs(s.forces.ay + s.vx * s.yawRate)); // centripetal accel
   }
   assert(peakAy > 15, `sustained lateral accel ${(peakAy / 9.81).toFixed(2)} g — expected > 1.5 g`);
@@ -54,7 +54,7 @@ const DT = 1 / 120;
 {
   const s = createVehicleState();
   s.vx = 8;
-  for (let i = 0; i < 4 * 120; i++) stepVehicle(s, 0.2, 0, 0.5, DT);
+  for (let i = 0; i < 4 * 120; i++) stepVehicle(s, { throttle: 0.2, brake: 0, steer: 0.5 }, DT);
   assert(s.heading > 0.3, `low-speed left steer must accumulate heading, got ${s.heading.toFixed(2)}`);
   assert(Math.abs(s.vy) < 3, "no runaway lateral velocity at low speed");
 }
@@ -62,7 +62,7 @@ const DT = 1 / 120;
 // 6. Rest is stable: no NaN, no creep
 {
   const s = createVehicleState(5, 7, 1);
-  for (let i = 0; i < 240; i++) stepVehicle(s, 0, 0, 0.7, DT);
+  for (let i = 0; i < 240; i++) stepVehicle(s, { throttle: 0, brake: 0, steer: 0.7 }, DT);
   assert(Number.isFinite(s.vx + s.vy + s.yawRate + s.x + s.z), "state must stay finite at rest");
   assert(Math.abs(s.x - 5) < 0.1 && Math.abs(s.z - 7) < 0.1, "car must not creep with no input");
 }
@@ -77,7 +77,7 @@ import { createTireModel, stepTires, gripFactor, COMPOUNDS } from "../src/tires"
   const tires = createTireModel("soft");
   const t0 = tires.front.tBulk;
   for (let i = 0; i < 60 * 120; i++) {
-    stepVehicle(s, 0.5, 0, 0.5, DT, undefined, {
+    stepVehicle(s, { throttle: 0.5, brake: 0, steer: 0.5 }, DT, undefined, {
       front: gripFactor(tires.front, tires.compound),
       rear: gripFactor(tires.rear, tires.compound),
     });
@@ -110,6 +110,64 @@ import { createTireModel, stepTires, gripFactor, COMPOUNDS } from "../src/tires"
   assert(at(c.tOpt, 0.9) < at(c.tOpt, 0) * 0.85, "worn tire past the cliff must lose >15% grip");
   assert(COMPOUNDS.soft.gripPeak > COMPOUNDS.hard.gripPeak, "soft must out-grip hard");
   assert(COMPOUNDS.soft.wearRate > COMPOUNDS.hard.wearRate, "soft must wear faster than hard");
+}
+
+// ---- Phase 4: aero maps, DRS, ERS ----
+import { aeroCoeffs, DEFAULT_PARAMS } from "../src/vehicle";
+import { createErsState, stepErs, ERS } from "../src/ers";
+
+// 10. Aero map: lower ride height → more downforce; DRS cuts drag and rear load
+{
+  const low = { ...DEFAULT_PARAMS, rideHeightF: 28, rideHeightR: 38 };
+  const high = { ...DEFAULT_PARAMS, rideHeightF: 50, rideHeightR: 70 };
+  assert(aeroCoeffs(low, false).clA > aeroCoeffs(high, false).clA, "lower ride height must add downforce");
+  const closed = aeroCoeffs(DEFAULT_PARAMS, false);
+  const open = aeroCoeffs(DEFAULT_PARAMS, true);
+  assert(open.cdA < closed.cdA, "DRS must cut drag");
+  assert(open.clA < closed.clA, "DRS must dump downforce");
+  const stalled = aeroCoeffs({ ...DEFAULT_PARAMS, rideHeightF: 20, rideHeightR: 30 }, false);
+  const okLow = aeroCoeffs({ ...DEFAULT_PARAMS, rideHeightF: 26, rideHeightR: 36 }, false);
+  assert(stalled.clA < okLow.clA, "floor must stall below minimum ride height");
+}
+
+// 11. DRS raises top speed measurably
+{
+  const closed = createVehicleState();
+  const open = createVehicleState();
+  for (let i = 0; i < 60 * 120; i++) {
+    stepVehicle(closed, { throttle: 1, brake: 0, steer: 0 }, DT);
+    stepVehicle(open, { throttle: 1, brake: 0, steer: 0, drs: true }, DT);
+  }
+  const gain = (open.vx - closed.vx) * 3.6;
+  assert(gain > 5 && gain < 40, `DRS top-speed gain ${gain.toFixed(1)} km/h — expected 5-40`);
+}
+
+// 12. ERS: deployment adds power and drains SOC; harvest refills under braking
+{
+  const e = createErsState();
+  e.mode = "hotlap";
+  const soc0 = e.soc;
+  let boosted = 0;
+  for (let i = 0; i < 10 * 120; i++) boosted = Math.max(boosted, stepErs(e, 1, 0, 60, DT));
+  assert(boosted === ERS.maxPower, `full deploy must reach ${ERS.maxPower} W, got ${boosted}`);
+  assert(e.soc < soc0, "deployment must drain the battery");
+
+  const socLow = e.soc;
+  for (let i = 0; i < 10 * 120; i++) stepErs(e, 0, 1, 60, DT);
+  assert(e.soc > socLow, "braking must harvest energy back");
+  assert(e.soc <= ERS.capacity, "SOC cannot exceed capacity");
+  assert(e.harvestedThisLap <= ERS.harvestPerLap + 1, "per-lap harvest limit must hold");
+}
+
+// 13. ERS balanced mode preserves a reserve; off mode never deploys
+{
+  const e = createErsState();
+  e.mode = "balanced";
+  for (let i = 0; i < 300 * 120; i++) stepErs(e, 1, 0, 60, DT);
+  assert(e.soc >= 0.29 * ERS.capacity, `balanced mode must keep ~30% reserve, got ${(e.soc / ERS.capacity * 100).toFixed(0)}%`);
+  const off = createErsState();
+  off.mode = "off";
+  assert(stepErs(off, 1, 0, 60, DT) === 0, "off mode must not deploy");
 }
 
 console.log("vehicle-check: all assertions passed");

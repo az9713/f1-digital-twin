@@ -8,6 +8,7 @@ import { loadSession } from "./session";
 import { Ghost } from "./ghost";
 import { ForceArrows } from "./forces";
 import { createTireModel, stepTires, gripFactor, tempToColor } from "./tires";
+import { createErsState, stepErs, cycleErsMode, ERS } from "./ers";
 
 const app = document.getElementById("app")!;
 const speedEl = document.getElementById("speed-val")!;
@@ -76,6 +77,17 @@ async function init() {
   const tireFEl = document.getElementById("tire-f")!;
   const tireREl = document.getElementById("tire-r")!;
 
+  const ers = createErsState();
+  let drsWanted = false;
+  window.addEventListener("keydown", (e) => {
+    if (e.repeat) return;
+    if (e.code === "KeyE") drsWanted = !drsWanted;
+    if (e.code === "KeyQ") cycleErsMode(ers);
+  });
+  const socBarEl = document.getElementById("soc-bar")!;
+  const ersModeEl = document.getElementById("ers-mode")!;
+  const drsEl = document.getElementById("drs")!;
+
   const FIXED_DT = 1 / 120; // fixed-step sim, decoupled from render rate
   let accumulator = 0;
   let last = performance.now();
@@ -88,10 +100,19 @@ async function init() {
     accumulator += frameDt;
     while (accumulator >= FIXED_DT) {
       input.update(FIXED_DT);
-      stepVehicle(vehicle, input.throttle, input.brake, input.steer, FIXED_DT, undefined, {
-        front: gripFactor(tires.front, tires.compound),
-        rear: gripFactor(tires.rear, tires.compound),
-      });
+      // DRS closes itself under braking, steering, or low speed
+      if (input.brake > 0.05 || Math.abs(input.steer) > 0.25 || vehicle.speed < 22) drsWanted = false;
+      const boost = stepErs(ers, input.throttle, input.brake, vehicle.speed, FIXED_DT);
+      stepVehicle(
+        vehicle,
+        { throttle: input.throttle, brake: input.brake, steer: input.steer, drs: drsWanted, powerBoost: boost },
+        FIXED_DT,
+        undefined,
+        {
+          front: gripFactor(tires.front, tires.compound),
+          rear: gripFactor(tires.rear, tires.compound),
+        }
+      );
       stepTires(tires, vehicle, FIXED_DT);
       ghost?.update(FIXED_DT);
       accumulator -= FIXED_DT;
@@ -127,6 +148,12 @@ async function init() {
     };
     updateTile(tireFEl, tires.front);
     updateTile(tireREl, tires.rear);
+
+    // ERS + DRS HUD
+    socBarEl.style.width = `${(ers.soc / ERS.capacity) * 100}%`;
+    socBarEl.style.background = ers.deploying ? "#f59e0b" : "#22d3ee";
+    ersModeEl.textContent = `ERS: ${ers.mode}`;
+    drsEl.style.opacity = drsWanted ? "1" : "0.25";
 
     arrows.update(vehicle);
     rig.update(vehicle, frameDt);
