@@ -30,9 +30,9 @@ All models documented with equations in the in-game **[Physics Notes](public/phy
 
 | Model | Method |
 |---|---|
-| Vehicle dynamics | Dynamic single-track model, body-frame Newton–Euler, load transfer |
-| Tires (grip) | Pacejka Magic Formula lateral + friction-circle long/lat coupling |
-| Tires (thermal) | 3-node network (surface/bulk/carcass), speed-dependent convection |
+| Vehicle dynamics | 6-DOF rigid chassis (surge/sway/yaw + heave/roll/pitch) on 4 independent corners, spring–damper–ARB per corner, stepped at 1 kHz on a Web Worker |
+| Tires (grip) | Magic Formula 6.x per corner: combined slip via cosine weighting functions, load-sensitive μ, relaxation-length transients |
+| Tires (thermal) | Per-tire ring model — 8 circumferential tread nodes + bulk + carcass, heat entering only the segment in the contact patch |
 | Tires (wear) | Sliding-energy accumulation, overheat acceleration, grip cliff at 65 % |
 | Aero | Ride-height/rake maps, floor stall, DRS drag/load dump |
 | ERS | 120 kW MGU-K, 4 MJ store, per-lap deploy/harvest limits, 4 modes |
@@ -49,8 +49,10 @@ racing line with the game's exact vehicle parameters ([docs/validation.md](docs/
 | Top speed | 334 km/h | 333 km/h | +0.3 % |
 | Track length | 5756 m | 5793 m | −0.6 % |
 
-`npm run check` runs 16 physics acceptance tests (0–100 in 2.4 s, 300–0 braking,
-sustained 3.4 g cornering, thermal windows, wear cliff, ERS budgets, strategy crossovers).
+`npm run check` runs both suites: `check:v1` (16 acceptance tests — 0–100 in 2.4 s, 300–0
+braking, sustained 3.4 g cornering, thermal windows, wear cliff, ERS budgets, strategy
+crossovers) and `check:b` (8 Milestone B tests — combined slip, relaxation lengths,
+6-DOF statics, load transfer, ring thermal, and a QSS lap on the new model at **+1.7 %**).
 
 ## Data pipeline
 
@@ -61,9 +63,12 @@ sustained 3.4 g cornering, thermal windows, wear cliff, ERS budgets, strategy cr
 python data/bake_session.py 9590 1 monza-2024   # session_key driver out_name
 ```
 
-## Known simplifications (v1)
+## Known simplifications
 
-- Single-track (bicycle) model: no per-wheel loads, kerbs, or 3D suspension — v2 spec covers this
+- No wheel-spin DOF: slip ratio is inverted from the brake/drive force demand, then relaxed
+- Wheels are assumed to stay on the ground — no unsprung masses, tire vertical spring, or kerb strikes
+- No suspension kinematics yet (camber/toe curves), so no camber term in the tire model
+- Ring thermal is circumferential only (8 nodes), not the spec's 8 × 3 grid
 - Track fitted from the driven racing line; chicane apex curvature is over-tight (−26 % on min speed)
 - DRS is free-toggle at speed rather than zone-gated; braking is ~30 % stronger than real
 - Strategy sim prices laps analytically instead of AI-driving them

@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "check": "rolldown test/vehicle-check.ts --file .check/vehicle-check.mjs --format esm --platform node && node .check/vehicle-check.mjs",
+    "check": "npm run check:v1 && npm run check:b",
+    "check:v1": "rolldown test/vehicle-check.ts --file .check/vehicle-check.mjs --format esm --platform node && node .check/vehicle-check.mjs",
+    "check:b": "rolldown test/physics-b-check.ts --file .check/physics-b-check.mjs --format esm --platform node && node .check/physics-b-check.mjs",
     "validate": "rolldown test/lap-sim.ts --file .check/lap-sim.mjs --format esm --platform node && node .check/lap-sim.mjs"
   },
   "devDependencies": {

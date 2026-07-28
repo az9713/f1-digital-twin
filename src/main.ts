@@ -2,17 +2,20 @@ import * as THREE from "three";
 import { createCar } from "./car";
 import { createTrack, centerlineFromLap, drsZones, inDrsZone } from "./track";
 import { Input } from "./input";
-import { createVehicleState, stepVehicle } from "./vehicle";
+import { createVehicleState } from "./vehicle";
+import type { Snapshot, ToWorker } from "./physics-worker";
 import { CameraRig } from "./cameras";
 import { loadSession } from "./session";
 import { Ghost } from "./ghost";
 import { ForceArrows } from "./forces";
-import { createTireModel, stepTires, gripFactor, tempToColor } from "./tires";
+import { tempToColor } from "./tires";
 import { createErsState, stepErs, cycleErsMode, ERS, resetLap } from "./ers";
 import { Timing, fmtLap } from "./timing";
 import { setupOverlays, type SessionMode } from "./ui";
 import { DEFAULT_PARAMS } from "./vehicle";
 import { COMPOUNDS } from "./tires";
+
+const WHEEL_OF = [1, 0, 3, 2]; // physics corner FL,FR,RL,RR → car.wheels index
 
 const app = document.getElementById("app")!;
 const speedEl = document.getElementById("speed-val")!;
@@ -68,7 +71,52 @@ async function init() {
   // Spawn on the start/finish line, pointing along the track
   const startPos = trackCurve.getPointAt(0);
   const startTan = trackCurve.getTangentAt(0);
-  const vehicle = createVehicleState(startPos.x, startPos.z, Math.atan2(startTan.x, startTan.z));
+  const startHeading = Math.atan2(startTan.x, startTan.z);
+
+  // Milestone B: the 6-DOF chassis + MF6 tires live on a worker at 1 kHz.
+  // `vehicle` is the main thread's *view* of it — two snapshots interpolated,
+  // in the same shape the cameras, timing, ghost delta and force arrows expect.
+  const physics = new Worker(new URL("./physics-worker.ts", import.meta.url), { type: "module" });
+  const post = (m: ToWorker) => physics.postMessage(m);
+  const vehicle = Object.assign(createVehicleState(startPos.x, startPos.z, startHeading), {
+    roll: 0, pitch: 0, heave: 0,
+  });
+  let tireView: Snapshot["tires"] = [0, 1, 2, 3].map(() => ({ tSurface: 60, tBulk: 60, wear: 0, spread: 0 }));
+  let snapPrev: Snapshot | null = null;
+  let snapCur: Snapshot | null = null;
+  let snapAt = 0; // s, when the newest snapshot arrived
+  let snapGap = 0.008; // s between snapshots, measured
+  physics.onmessage = (e: MessageEvent<Snapshot>) => {
+    snapPrev = snapCur ?? e.data;
+    snapCur = e.data;
+    const now = performance.now() / 1000;
+    if (snapAt) snapGap = Math.max(0.002, Math.min(0.05, now - snapAt));
+    snapAt = now;
+    tireView = e.data.tires;
+  };
+  post({ cmd: "reset", x: startPos.x, z: startPos.z, heading: startHeading });
+
+  /** Render one snapshot behind the worker, lerped by arrival time. */
+  function syncView() {
+    if (!snapPrev || !snapCur) return;
+    const f = Math.min(1, (performance.now() / 1000 - snapAt) / snapGap);
+    const a = snapPrev;
+    const b = snapCur;
+    const l = (p: number, q: number) => p + (q - p) * f;
+    vehicle.x = l(a.x, b.x);
+    vehicle.z = l(a.z, b.z);
+    vehicle.heading = l(a.heading, b.heading); // unwrapped, so a plain lerp is safe
+    vehicle.roll = l(a.roll, b.roll);
+    vehicle.pitch = l(a.pitch, b.pitch);
+    vehicle.heave = l(a.heave, b.heave);
+    vehicle.speed = l(a.speed, b.speed);
+    vehicle.vx = l(a.vx, b.vx);
+    vehicle.vy = l(a.vy, b.vy);
+    vehicle.yawRate = l(a.yawRate, b.yawRate);
+    vehicle.steerAngle = l(a.steerAngle, b.steerAngle);
+    vehicle.wheelSpin = l(a.wheelSpin, b.wheelSpin);
+    vehicle.forces = b.forces;
+  }
 
   const input = new Input();
   const rig = new CameraRig(renderer);
@@ -78,9 +126,7 @@ async function init() {
     if (e.code === "KeyF" && !e.repeat) arrows.toggle();
   });
   let compoundKey: keyof typeof COMPOUNDS = "medium";
-  let tires = createTireModel(compoundKey);
-  const tireFEl = document.getElementById("tire-f")!;
-  const tireREl = document.getElementById("tire-r")!;
+  const tireEls = ["tire-fl", "tire-fr", "tire-rl", "tire-rr"].map((id) => document.getElementById(id)!);
   const compoundEl = document.getElementById("compound-label")!;
 
   const ers = createErsState();
@@ -101,10 +147,11 @@ async function init() {
   timing.timer.onLapComplete = () => resetLap(ers);
   const MODE_FUEL: Record<SessionMode, number> = { quali: 12, practice: 30, race: 100 };
   let fuel = MODE_FUEL.quali; // kg
-  const params = { ...DEFAULT_PARAMS };
   const resetCar = () => {
     const p0 = trackCurve.getPointAt(0);
     const t0 = trackCurve.getTangentAt(0);
+    post({ cmd: "reset", x: p0.x, z: p0.z, heading: Math.atan2(t0.x, t0.z) });
+    snapPrev = snapCur = null;
     Object.assign(vehicle, createVehicleState(p0.x, p0.z, Math.atan2(t0.x, t0.z)));
   };
   const modeLabelEl = document.getElementById("mode-label")!;
@@ -112,13 +159,13 @@ async function init() {
     canPit: () => vehicle.speed < 5,
     onCompound: (c) => {
       compoundKey = c;
-      tires = createTireModel(c);
+      post({ cmd: "compound", key: c });
       compoundEl.textContent = COMPOUNDS[c].name;
       timing.timer.lapTime += 24; // pit loss
     },
     onMode: (m) => {
       fuel = MODE_FUEL[m];
-      tires = createTireModel(compoundKey);
+      post({ cmd: "compound", key: compoundKey });
       Object.assign(ers, createErsState());
       timing.reset();
       resetCar();
@@ -137,50 +184,41 @@ async function init() {
   const fuelEl = document.getElementById("fuel")!;
   const sectorEls = ["s1", "s2", "s3"].map((id) => document.getElementById(id)!);
 
-  const FIXED_DT = 1 / 120; // fixed-step sim, decoupled from render rate
-  let accumulator = 0;
   let last = performance.now();
+  car.root.rotation.order = "YXZ"; // yaw, then pitch about the car's axle line, then roll
 
   function frame(now: number) {
     requestAnimationFrame(frame);
     const frameDt = Math.min((now - last) / 1000, 0.1);
     last = now;
 
-    accumulator += frameDt;
-    while (accumulator >= FIXED_DT) {
-      if (ui.paused()) {
-        accumulator = 0;
-        break;
-      }
-      input.update(FIXED_DT);
+    if (!ui.paused()) {
+      syncView();
+      input.update(frameDt);
       // DRS: only inside curvature-derived zones, and it closes itself under
       // braking, steering, or low speed
       const tPos = timing.trackT(vehicle);
       drsAvailable = inDrsZone(zones, tPos);
       if (!drsAvailable || input.brake > 0.05 || Math.abs(input.steer) > 0.25 || vehicle.speed < 22)
         drsWanted = false;
-      const boost = stepErs(ers, input.throttle, input.brake, vehicle.speed, FIXED_DT);
-      fuel = Math.max(0, fuel - input.throttle * 0.042 * FIXED_DT);
-      params.mass = DEFAULT_PARAMS.mass + fuel;
-      stepVehicle(
-        vehicle,
-        { throttle: input.throttle, brake: input.brake, steer: input.steer, drs: drsWanted, powerBoost: boost },
-        FIXED_DT,
-        params,
-        {
-          front: gripFactor(tires.front, tires.compound),
-          rear: gripFactor(tires.rear, tires.compound),
-        }
-      );
-      stepTires(tires, vehicle, FIXED_DT);
-      timing.update(vehicle, FIXED_DT, tPos);
-      ghost?.update(FIXED_DT);
-      accumulator -= FIXED_DT;
+      const boost = stepErs(ers, input.throttle, input.brake, vehicle.speed, frameDt);
+      fuel = Math.max(0, fuel - input.throttle * 0.042 * frameDt);
+      post({
+        cmd: "controls",
+        u: {
+          throttle: input.throttle, brake: input.brake, steer: input.steer,
+          drs: drsWanted, powerBoost: boost, mass: DEFAULT_PARAMS.mass + fuel,
+        },
+      });
+      timing.update(vehicle, frameDt, tPos);
+      ghost?.update(frameDt);
     }
 
     // Sync visuals
     car.root.position.set(vehicle.x, 0, vehicle.z);
-    car.root.rotation.y = vehicle.heading;
+    // +x is the car's left here (heading 0 = +z forward, body y = left), so a
+    // right-side-down roll raises +x → rotation.z takes roll unnegated.
+    car.root.rotation.set(vehicle.pitch, vehicle.heading, vehicle.roll);
     for (const w of car.wheels) w.rotation.x = vehicle.wheelSpin;
     for (const fw of car.frontWheels) fw.rotation.y = vehicle.steerAngle;
 
@@ -189,25 +227,25 @@ async function init() {
     sun.target.position.set(vehicle.x, 0, vehicle.z);
     sun.target.updateMatrixWorld();
 
-    // Tire heat tint on the 3D wheels (front = wheels 0,1 / rear = 2,3)
-    const [rf, gf, bf] = tempToColor(tires.front.tSurface);
-    const [rr, gr, br] = tempToColor(tires.rear.tSurface);
-    (car.wheels[0].material as THREE.MeshStandardMaterial).color.setRGB(rf * 0.6, gf * 0.6, bf * 0.6);
-    (car.wheels[1].material as THREE.MeshStandardMaterial).color.setRGB(rf * 0.6, gf * 0.6, bf * 0.6);
-    (car.wheels[2].material as THREE.MeshStandardMaterial).color.setRGB(rr * 0.6, gr * 0.6, br * 0.6);
-    (car.wheels[3].material as THREE.MeshStandardMaterial).color.setRGB(rr * 0.6, gr * 0.6, br * 0.6);
-
-    // HUD tire widget
-    const updateTile = (el: HTMLElement, t: { tSurface: number; wear: number }) => {
+    // Tire heat tint + HUD tile, now one per corner (FL, FR, RL, RR).
+    // car.wheels is built right-first (x = -track/2 is +x-negative = the right
+    // side), so the mesh for corner i is WHEEL_OF[i].
+    for (let i = 0; i < 4; i++) {
+      const t = tireView[i];
       const [r, g, b] = tempToColor(t.tSurface);
+      (car.wheels[WHEEL_OF[i]].material as THREE.MeshStandardMaterial).color.setRGB(r * 0.6, g * 0.6, b * 0.6);
+      const el = tireEls[i];
       el.style.borderColor = `rgb(${r * 255},${g * 255},${b * 255})`;
       (el.querySelector(".t") as HTMLElement).textContent = `${Math.round(t.tSurface)}°`;
       const bar = el.querySelector(".w div") as HTMLElement;
       bar.style.width = `${Math.max(0, (1 - t.wear) * 100)}%`;
       bar.style.background = t.wear > 0.65 ? "#ef4444" : t.wear > 0.4 ? "#f59e0b" : "#10b981";
-    };
-    updateTile(tireFEl, tires.front);
-    updateTile(tireREl, tires.rear);
+      // Load bar: how hard this corner is being worked, 0..1 of its friction ellipse
+      const use = el.querySelector(".u div") as HTMLElement;
+      const u = snapCur ? snapCur.corners[i].use : 0;
+      use.style.width = `${u * 100}%`;
+      use.style.background = u > 0.95 ? "#ef4444" : "#22d3ee";
+    }
 
     // ERS + DRS HUD
     socBarEl.style.width = `${(ers.soc / ERS.capacity) * 100}%`;

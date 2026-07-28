@@ -5,7 +5,13 @@
 
 ## Current state
 
-**v1 COMPLETE + polish pass shipped — Phases 0–6 all verified.**
+**v1 COMPLETE + polish + v2 Milestone B shipped.**
+Milestone B (this session): MF6 combined-slip tires (cosine weighting, load-
+sensitive μ, relaxation lags, analytic slip inverse — no wheel-spin DOF),
+6-DOF chassis on 4 corners (spring/damper/ARB, ~0.02° static rake solved in
+staticAttitude()), 8-node circumferential ring thermal per corner, all on a
+1 kHz Web Worker with interpolated rendering. New-model QSS lap +1.7%
+(v1 model still +1.5%); `check` = check:v1 && check:b, both green.
 Polish (this session): DRS gated to curvature-derived zones (radius > 600 m for
 ≥ 250 m, opens 120 m in; 5 zones / 2468 m at Monza; HUD lamp shows availability),
 brakes softened 36 → 18 kN (300–0 now 133 m vs real ~140 m; QSS lap error +1.5%,
@@ -26,11 +32,12 @@ Working tree clean, local == remote. All green: `npm run check` (16 physics test
 
 ## Next task
 
-- **v2 Milestone B** (docs/three-ambitious-simulation-specs-v2.html, F1 tab):
-  MF6 combined slip + relaxation lengths + ring thermal, 6-DOF chassis + 4 corners
-  on a physics worker at 1 kHz. Keep v1 acceptance tests green throughout.
-- After F1 v2 (or if user redirects): Mars Sample Return v1, then eVTOL v1
-  (specs in docs/, user chose strict v1-then-v2 per project).
+- **v2 next milestones** (docs/three-ambitious-simulation-specs-v2.html, F1 tab)
+  or Milestone B leftovers: friction-ellipse dials + 3-D tread heat map viz,
+  wheel-spin DOF, camber-driven lateral ring gradient, suspension kinematics/LSD.
+- Sibling projects now exist (parallel agent builds, Phases 0–1 shipped + live):
+  ../mars-sample-return (Kepler/patched-conic planner) and ../evtol-studio
+  (6-DOF multirotor + BEM-lite). Next: Mars Phase 2-3, eVTOL Phase 2-3.
 
 ## How to work (essentials)
 

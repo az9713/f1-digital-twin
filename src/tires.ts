@@ -104,6 +104,90 @@ export function stepTires(t: TireModelState, s: VehicleState, dt: number) {
   stepAxle(t.rear, t.compound, slideR, rollR, v, dt);
 }
 
+// ---- Milestone B: ring-discretized tread thermal, one model per tire ----
+//
+// The tread is split into RING_NODES segments around the circumference. Only
+// the segment currently in the contact patch takes sliding heat and conducts
+// into the track; every segment convects to air and exchanges with the bulk,
+// and neighbours conduct to each other. A lock-up therefore parks all the heat
+// in one segment (a flat spot) while a rolling tire smears it evenly.
+//
+// ponytail: circumferential only (the spec's 8 × 3 grid without the 3 lateral
+// nodes) — the chassis has no camber model yet, so there is nothing to drive a
+// lateral temperature gradient. Lumped totals match the axle model exactly, so
+// gripFactor / tempToColor / the HUD all work unchanged.
+
+export const RING_NODES = 8;
+const K_RING = 30; // W/K between adjacent tread segments
+const WHEEL_R = 0.33; // m, matches CAR_DIMENSIONS.WHEEL_RADIUS
+// The constants above are lumped per axle *pair*; one tire is half of that.
+// Scaling capacities and conductances together leaves the time constants alone,
+// so a corner fed half the axle's heat settles at the same temperature.
+const S = 0.5;
+
+export interface CornerTire extends AxleTire {
+  ring: number[]; // °C per circumferential tread segment
+  phase: number; // rad of wheel rotation, picks the contact segment
+}
+
+export type CornerTireSet = { corners: CornerTire[]; compound: Compound };
+
+export function createCornerTires(compoundKey: keyof typeof COMPOUNDS = "medium"): CornerTireSet {
+  const cold = (): CornerTire => ({
+    tSurface: 60, tBulk: 60, tCarcass: 55, wear: 0,
+    ring: new Array(RING_NODES).fill(60), phase: 0,
+  });
+  return { corners: [cold(), cold(), cold(), cold()], compound: COMPOUNDS[compoundKey] };
+}
+
+/**
+ * Advance one tire. `slidePower` is frictional sliding power at the patch,
+ * `rollPower` deformation heating, `v` road speed, `spin` wheel surface speed
+ * (differs from `v` under lock-up or wheelspin, which is what moves the patch).
+ */
+export function stepCornerTire(
+  t: CornerTire,
+  c: Compound,
+  slidePower: number,
+  rollPower: number,
+  v: number,
+  spin: number,
+  dt: number
+) {
+  const n = t.ring.length;
+  t.phase = (t.phase + (Math.abs(spin) / WHEEL_R) * dt) % (2 * Math.PI);
+  const hot = Math.min(n - 1, Math.floor((t.phase / (2 * Math.PI)) * n));
+  const cNode = (S * C_SURFACE) / n;
+  const next = t.ring.slice();
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const T = t.ring[i];
+    const inPatch = i === hot;
+    const heat = inPatch ? slidePower * 0.85 + rollPower : 0;
+    const conv = ((S * H_SURF) / n) * (3 + v) * (T - T_AMBIENT);
+    const toTrack = inPatch ? S * 25 * (T - T_TRACK) : 0;
+    const cond = K_RING * (2 * T - t.ring[(i + 1) % n] - t.ring[(i + n - 1) % n]);
+    const sb = ((S * K_SB) / n) * (T - t.tBulk);
+    next[i] = T + ((heat - conv - toTrack - cond - sb) / cNode) * dt;
+    sum += next[i];
+  }
+  t.ring = next;
+  t.tSurface = sum / n;
+
+  const sbTotal = S * K_SB * (t.tSurface - t.tBulk);
+  const bc = S * K_BC * (t.tBulk - t.tCarcass);
+  t.tBulk += ((sbTotal + slidePower * 0.15 - bc) / (S * C_BULK)) * dt;
+  t.tCarcass += ((bc - S * H_CARC * (3 + v) * (t.tCarcass - T_AMBIENT)) / (S * C_CARCASS)) * dt;
+
+  const hotFactor = 1 + Math.max(0, (t.tSurface - c.tOpt - 15) / 60);
+  t.wear = Math.min(1, t.wear + ((slidePower * dt) / 1e6) * c.wearRate * hotFactor);
+}
+
+/** Peak-to-mean tread temperature spread — a flat spot shows up here. */
+export function ringSpread(t: CornerTire): number {
+  return Math.max(...t.ring) - Math.min(...t.ring);
+}
+
 /** Map a surface temperature to a display color (blue → green → yellow → red). */
 export function tempToColor(tC: number): [number, number, number] {
   const stops: [number, [number, number, number]][] = [

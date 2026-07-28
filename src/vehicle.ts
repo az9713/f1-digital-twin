@@ -72,9 +72,9 @@ export interface Controls {
   powerBoost?: number; // W, e.g. ERS deployment
 }
 
-const RHO = 1.2; // air density kg/m³
-const G = 9.81;
-const MAX_STEER = 0.35; // rad at the wheels
+export const RHO = 1.2; // air density kg/m³
+export const G = 9.81;
+export const MAX_STEER = 0.35; // rad at the wheels
 
 export interface Forces {
   fyFront: number; // N, lateral at front axle (body y)
