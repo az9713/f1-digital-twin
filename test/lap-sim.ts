@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import { DEFAULT_PARAMS, aeroCoeffs } from "../src/vehicle";
-import { centerlineFromLap } from "../src/track";
+import { centerlineFromLap, drsZones } from "../src/track";
+import { Timing } from "../src/timing";
+import type { VehicleState } from "../src/vehicle";
 
 // Validation: quasi-steady-state (QSS) lap-time simulation over the fitted
 // Monza racing line, using the same vehicle parameters the game drives with.
@@ -105,4 +107,35 @@ console.log(report);
 // Hard gates: the model must stay in the physical ballpark of the real lap
 if (Math.abs(err) > 8) throw new Error(`lap time error ${err.toFixed(1)}% exceeds 8% gate`);
 if (Math.abs(simVmax - realVmax) / realVmax > 0.08) throw new Error("top speed off by more than 8%");
+
+// DRS zones on the fitted Monza line: at least the two big straights, plausible total length
+const zones = drsZones(curve);
+const zoneLen = zones.reduce((acc, [s, e]) => acc + (e >= s ? e - s : 1 - s + e), 0) * trackLen;
+if (zones.length < 2) throw new Error(`expected ≥2 DRS zones at Monza, got ${zones.length}`);
+if (zoneLen < 800 || zoneLen > 4000) throw new Error(`DRS zone total ${zoneLen.toFixed(0)} m implausible`);
+console.log(`DRS zones: ${zones.length}, total ${zoneLen.toFixed(0)} m`);
+
+// Sector timing: walk the centerline at 50 m/s for 2.5 laps, all three sectors
+// must record and sum to the lap time at that speed
+{
+  const timing = new Timing(curve, null);
+  const vs = { x: 0, z: 0, speed: 50 } as VehicleState;
+  const dt = 0.05;
+  let dist = 0.5 * trackLen; // start mid-lap so the line crossing arms cleanly
+  while (dist < 3 * trackLen) {
+    const t = (dist / trackLen) % 1;
+    const p = curve.getPointAt(t);
+    vs.x = p.x;
+    vs.z = p.z;
+    timing.update(vs, dt, t);
+    dist += 50 * dt;
+  }
+  if (timing.timer.lap < 2) throw new Error(`lap counter ${timing.timer.lap}, expected ≥2`);
+  if (timing.sectors.last.some((v) => v === null)) throw new Error("all three sectors must record");
+  const secSum = (timing.sectors.last as number[]).reduce((a, b) => a + b, 0);
+  const lapAt50 = trackLen / 50;
+  if (Math.abs(secSum - lapAt50) / lapAt50 > 0.05)
+    throw new Error(`sector sum ${secSum.toFixed(1)}s vs lap ${lapAt50.toFixed(1)}s at 50 m/s`);
+  console.log(`sector timing ok: ${timing.sectors.last.map((v) => v!.toFixed(1)).join(" + ")} s`);
+}
 console.log("validation gates passed");

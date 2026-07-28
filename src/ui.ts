@@ -3,28 +3,45 @@ import type { COMPOUNDS } from "./tires";
 
 // Phase 5 overlays: pit stop + strategy sandbox. Pausing is owned here.
 
+export type SessionMode = "quali" | "practice" | "race";
+
 export interface UiHooks {
   canPit: () => boolean;
   onCompound: (c: keyof typeof COMPOUNDS) => void;
+  onMode: (m: SessionMode) => void;
   baseLap: number; // clean-lap baseline for the strategy sim, seconds
 }
 
 export function setupOverlays(hooks: UiHooks): { paused: () => boolean } {
   const pitOverlay = document.getElementById("pit-overlay")!;
   const stratOverlay = document.getElementById("strategy-overlay")!;
+  const modeOverlay = document.getElementById("mode-overlay")!;
   const open = (el: HTMLElement) => el.classList.add("open");
   const close = (el: HTMLElement) => el.classList.remove("open");
-  const anyOpen = () => pitOverlay.classList.contains("open") || stratOverlay.classList.contains("open");
+  const anyOpen = () =>
+    pitOverlay.classList.contains("open") ||
+    stratOverlay.classList.contains("open") ||
+    modeOverlay.classList.contains("open");
 
   window.addEventListener("keydown", (e) => {
     if (e.repeat) return;
     if (e.code === "KeyP" && !anyOpen() && hooks.canPit()) open(pitOverlay);
     if (e.code === "KeyT") stratOverlay.classList.toggle("open");
+    if (e.code === "KeyM") modeOverlay.classList.toggle("open");
     if (e.code === "Escape") {
       close(pitOverlay);
       close(stratOverlay);
+      close(modeOverlay);
     }
   });
+
+  modeOverlay.querySelectorAll("button[data-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      hooks.onMode((btn as HTMLElement).dataset.mode as SessionMode);
+      close(modeOverlay);
+    });
+  });
+  document.getElementById("mode-cancel")!.addEventListener("click", () => close(modeOverlay));
 
   pitOverlay.querySelectorAll("button[data-compound]").forEach((btn) => {
     btn.addEventListener("click", () => {

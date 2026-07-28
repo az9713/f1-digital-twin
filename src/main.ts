@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createCar } from "./car";
-import { createTrack, centerlineFromLap } from "./track";
+import { createTrack, centerlineFromLap, drsZones, inDrsZone } from "./track";
 import { Input } from "./input";
 import { createVehicleState, stepVehicle } from "./vehicle";
 import { CameraRig } from "./cameras";
@@ -10,7 +10,7 @@ import { ForceArrows } from "./forces";
 import { createTireModel, stepTires, gripFactor, tempToColor } from "./tires";
 import { createErsState, stepErs, cycleErsMode, ERS, resetLap } from "./ers";
 import { Timing, fmtLap } from "./timing";
-import { setupOverlays } from "./ui";
+import { setupOverlays, type SessionMode } from "./ui";
 import { DEFAULT_PARAMS } from "./vehicle";
 import { COMPOUNDS } from "./tires";
 
@@ -77,13 +77,16 @@ async function init() {
   window.addEventListener("keydown", (e) => {
     if (e.code === "KeyF" && !e.repeat) arrows.toggle();
   });
-  let tires = createTireModel("medium");
+  let compoundKey: keyof typeof COMPOUNDS = "medium";
+  let tires = createTireModel(compoundKey);
   const tireFEl = document.getElementById("tire-f")!;
   const tireREl = document.getElementById("tire-r")!;
   const compoundEl = document.getElementById("compound-label")!;
 
   const ers = createErsState();
+  const zones = drsZones(trackCurve);
   let drsWanted = false;
+  let drsAvailable = false;
   window.addEventListener("keydown", (e) => {
     if (e.repeat) return;
     if (e.code === "KeyE") drsWanted = !drsWanted;
@@ -96,23 +99,35 @@ async function init() {
   // Phase 5: timing, fuel, pit, strategy
   const timing = new Timing(trackCurve, session);
   timing.timer.onLapComplete = () => resetLap(ers);
-  let fuel = 12; // kg — qualifying-style load; pit menu is where race fills would go
+  const MODE_FUEL: Record<SessionMode, number> = { quali: 12, practice: 30, race: 100 };
+  let fuel = MODE_FUEL.quali; // kg
   const params = { ...DEFAULT_PARAMS };
+  const resetCar = () => {
+    const p0 = trackCurve.getPointAt(0);
+    const t0 = trackCurve.getTangentAt(0);
+    Object.assign(vehicle, createVehicleState(p0.x, p0.z, Math.atan2(t0.x, t0.z)));
+  };
+  const modeLabelEl = document.getElementById("mode-label")!;
   const ui = setupOverlays({
     canPit: () => vehicle.speed < 5,
     onCompound: (c) => {
+      compoundKey = c;
       tires = createTireModel(c);
       compoundEl.textContent = COMPOUNDS[c].name;
       timing.timer.lapTime += 24; // pit loss
     },
+    onMode: (m) => {
+      fuel = MODE_FUEL[m];
+      tires = createTireModel(compoundKey);
+      Object.assign(ers, createErsState());
+      timing.reset();
+      resetCar();
+      modeLabelEl.textContent = m[0].toUpperCase() + m.slice(1);
+    },
     baseLap: session ? session.meta.lap_time_s : 82,
   });
   window.addEventListener("keydown", (e) => {
-    if (e.code === "KeyR" && !e.repeat) {
-      const p0 = trackCurve.getPointAt(0);
-      const t0 = trackCurve.getTangentAt(0);
-      Object.assign(vehicle, createVehicleState(p0.x, p0.z, Math.atan2(t0.x, t0.z)));
-    }
+    if (e.code === "KeyR" && !e.repeat) resetCar();
   });
   const lapNoEl = document.getElementById("lap-no")!;
   const lapCurEl = document.getElementById("lap-cur")!;
@@ -120,6 +135,7 @@ async function init() {
   const lapBestEl = document.getElementById("lap-best")!;
   const deltaEl = document.getElementById("delta")!;
   const fuelEl = document.getElementById("fuel")!;
+  const sectorEls = ["s1", "s2", "s3"].map((id) => document.getElementById(id)!);
 
   const FIXED_DT = 1 / 120; // fixed-step sim, decoupled from render rate
   let accumulator = 0;
@@ -137,8 +153,12 @@ async function init() {
         break;
       }
       input.update(FIXED_DT);
-      // DRS closes itself under braking, steering, or low speed
-      if (input.brake > 0.05 || Math.abs(input.steer) > 0.25 || vehicle.speed < 22) drsWanted = false;
+      // DRS: only inside curvature-derived zones, and it closes itself under
+      // braking, steering, or low speed
+      const tPos = timing.trackT(vehicle);
+      drsAvailable = inDrsZone(zones, tPos);
+      if (!drsAvailable || input.brake > 0.05 || Math.abs(input.steer) > 0.25 || vehicle.speed < 22)
+        drsWanted = false;
       const boost = stepErs(ers, input.throttle, input.brake, vehicle.speed, FIXED_DT);
       fuel = Math.max(0, fuel - input.throttle * 0.042 * FIXED_DT);
       params.mass = DEFAULT_PARAMS.mass + fuel;
@@ -153,7 +173,7 @@ async function init() {
         }
       );
       stepTires(tires, vehicle, FIXED_DT);
-      timing.update(vehicle, FIXED_DT);
+      timing.update(vehicle, FIXED_DT, tPos);
       ghost?.update(FIXED_DT);
       accumulator -= FIXED_DT;
     }
@@ -193,7 +213,8 @@ async function init() {
     socBarEl.style.width = `${(ers.soc / ERS.capacity) * 100}%`;
     socBarEl.style.background = ers.deploying ? "#f59e0b" : "#22d3ee";
     ersModeEl.textContent = `ERS: ${ers.mode}`;
-    drsEl.style.opacity = drsWanted ? "1" : "0.25";
+    // DRS lamp: bright = open, dim green = available in this zone, faint = no zone
+    drsEl.style.opacity = drsWanted ? "1" : drsAvailable ? "0.65" : "0.2";
 
     // Timing HUD
     lapNoEl.textContent = String(timing.timer.lap);
@@ -201,6 +222,12 @@ async function init() {
     lapLastEl.textContent = fmtLap(timing.timer.lastLap);
     lapBestEl.textContent = fmtLap(timing.timer.bestLap);
     fuelEl.textContent = fuel.toFixed(1);
+    for (let i = 0; i < 3; i++) {
+      const el = sectorEls[i];
+      const last = timing.sectors.last[i];
+      el.textContent = last === null ? "––.––" : last.toFixed(2);
+      el.style.color = last !== null && last === timing.sectors.best[i] ? "#10b981" : "#e8eef7";
+    }
     const delta = timing.ghostDelta(vehicle);
     if (delta === null) {
       deltaEl.textContent = "±0.000";

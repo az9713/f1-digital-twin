@@ -34,6 +34,54 @@ export function centerlineFromLap(xs: number[], zs: number[]): THREE.CatmullRomC
   return new THREE.CatmullRomCurve3(pts, true, "catmullrom", 0.5);
 }
 
+/**
+ * DRS zones derived from track curvature: stretches with corner radius > 600 m
+ * that run at least 250 m, opening ~120 m past the corner exit (the activation
+ * line). Returned as [tStart, tEnd] curve-parameter ranges; a zone may wrap t=0.
+ */
+export function drsZones(curve: THREE.CatmullRomCurve3, n = 800): Array<[number, number]> {
+  const pts = Array.from({ length: n }, (_, i) => curve.getPointAt(i / n));
+  const straight: boolean[] = [];
+  const ds: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n], c = pts[(i + 2) % n];
+    const ab = Math.hypot(b.x - a.x, b.z - a.z);
+    const bc = Math.hypot(c.x - b.x, c.z - b.z);
+    const ca = Math.hypot(a.x - c.x, a.z - c.z);
+    const area2 = Math.abs((b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x));
+    const kappa = ab * bc * ca > 1e-9 ? (2 * area2) / (ab * bc * ca) : 0;
+    ds.push(ab);
+    straight.push(kappa < 1 / 600);
+  }
+  // Scan runs starting from a corner so a straight spanning t=0 stays one run
+  const k0 = straight.findIndex((s) => !s);
+  if (k0 < 0) return [[0, 1]]; // no corners at all
+  const zones: Array<[number, number]> = [];
+  let runStart = -1;
+  let runLen = 0;
+  for (let i = k0; i <= k0 + n; i++) {
+    if (i < k0 + n && straight[i % n]) {
+      if (runStart < 0) {
+        runStart = i;
+        runLen = 0;
+      }
+      runLen += ds[i % n];
+    } else if (runStart >= 0) {
+      if (runLen >= 250) {
+        const open = runStart + Math.ceil((120 / runLen) * (i - runStart));
+        zones.push([(open % n) / n, ((i - 1) % n) / n]);
+      }
+      runStart = -1;
+    }
+  }
+  return zones;
+}
+
+/** Is curve parameter t inside any zone? Handles zones that wrap t=0. */
+export function inDrsZone(zones: Array<[number, number]>, t: number): boolean {
+  return zones.some(([a, b]) => (a <= b ? t >= a && t <= b : t >= a || t <= b));
+}
+
 export function createTrack(scene: THREE.Scene, curve?: THREE.CatmullRomCurve3): THREE.CatmullRomCurve3 {
   curve = curve ?? createCenterline();
   const n = 800;

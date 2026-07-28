@@ -30,7 +30,7 @@ export const DEFAULT_PARAMS: VehicleParams = {
   b: 1.8,
   hCg: 0.3,
   powerMax: 735_000,
-  brakeForceMax: 36_000,
+  brakeForceMax: 18_000, // tuned so 300-0 lands at ~133 m, near the real ~140 m (was 91 m at 36 kN)
   brakeBias: 0.58,
   mu: 1.9,
   cdA: 1.5,

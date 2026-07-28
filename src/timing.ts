@@ -15,6 +15,10 @@ export interface LapTimer {
 
 export class Timing {
   timer: LapTimer = { lap: 0, lapTime: 0, lastLap: null, bestLap: null, onLapComplete: null };
+  // ponytail: sectors are fixed thirds of the curve, not official marshal posts
+  sectors = { last: [null, null, null] as (number | null)[], best: [null, null, null] as (number | null)[] };
+  private sectorIdx = -1;
+  private sectorClock = 0;
   private startPoint: THREE.Vector3;
   private startTangent: THREE.Vector3;
   private prevSide = 0;
@@ -76,8 +80,35 @@ export class Timing {
     return this.timer.lapTime - ghostTime;
   }
 
-  update(s: VehicleState, dt: number) {
+  /** Clear all times (session mode change). Keeps the lap-complete callback. */
+  reset() {
+    this.timer = { lap: 0, lapTime: 0, lastLap: null, bestLap: null, onLapComplete: this.timer.onLapComplete };
+    this.sectors = { last: [null, null, null], best: [null, null, null] };
+    this.sectorIdx = -1;
+    this.sectorClock = 0;
+    this.prevSide = 0;
+  }
+
+  update(s: VehicleState, dt: number, t = this.trackT(s)) {
     if (this.timer.lap > 0) this.timer.lapTime += dt;
+
+    // Sector timing off curve-parameter thirds, with its own clock so the
+    // start-line plane logic can't fight it. Only forward transitions count.
+    this.sectorClock += dt;
+    const sec = Math.min(2, Math.floor(t * 3));
+    if (this.sectorIdx === -1) {
+      this.sectorIdx = sec;
+    } else if (sec !== this.sectorIdx) {
+      if (sec === (this.sectorIdx + 1) % 3 && this.timer.lap > 0 && this.sectorClock > 5) {
+        const done = this.sectorIdx;
+        const st = this.sectorClock;
+        this.sectors.last[done] = st;
+        if (this.sectors.best[done] === null || st < this.sectors.best[done]!) this.sectors.best[done] = st;
+      }
+      this.sectorIdx = sec;
+      this.sectorClock = 0;
+    }
+
     const near = (s.x - this.startPoint.x) ** 2 + (s.z - this.startPoint.z) ** 2 < 30 * 30;
     const side = this.sideOf(s.x, s.z);
     if (near && this.prevSide < 0 && side >= 0 && s.speed > 3) {

@@ -93,7 +93,8 @@
       <b>F1 Digital Twin — Phase 0</b><br />
       W/S throttle-brake · A/D steer<br />
       C camera (chase / onboard / free) · F force arrows<br />
-      E DRS · Q ERS mode · P pit (when slow) · T strategy · R reset<br />
+      E DRS (in zones) · Q ERS mode · M session mode<br />
+      P pit (when slow) · T strategy · R reset<br />
       <a href="physics-notes.html" target="_blank" style="color:#22d3ee">Physics notes →</a>
     </div>
     <div id="speed"><span id="speed-val">0</span> <span>km/h</span></div>
@@ -108,11 +109,15 @@
       <div id="soc"><div id="soc-bar"></div></div>
     </div>
     <div id="timing">
-      <div><span class="label">Lap</span> <span id="lap-no">0</span>
+      <div><span id="mode-label" style="color:#22d3ee">Quali</span>
+        &nbsp;<span class="label">Lap</span> <span id="lap-no">0</span>
         &nbsp;<span class="label">Fuel</span> <span id="fuel">12</span><span class="label">kg</span></div>
       <div><span class="label">Time</span> <span id="lap-cur">–:––.–––</span></div>
       <div><span class="label">Last</span> <span id="lap-last">–:––.–––</span></div>
       <div><span class="label">Best</span> <span id="lap-best">–:––.–––</span></div>
+      <div style="font-size:11px"><span class="label">S1</span> <span id="s1">––.––</span>
+        <span class="label">S2</span> <span id="s2">––.––</span>
+        <span class="label">S3</span> <span id="s3">––.––</span></div>
       <div id="delta">±0.000</div>
     </div>
     <div class="overlay" id="pit-overlay">
@@ -123,6 +128,16 @@
         <button data-compound="medium" style="background:#d97706">Medium</button>
         <button data-compound="hard" style="background:#64748b">Hard</button>
         <button class="alt" id="pit-cancel">Stay out</button>
+      </div>
+    </div>
+    <div class="overlay" id="mode-overlay">
+      <div class="panel">
+        <h2>Session mode — fuel preset</h2>
+        <p class="hint">Resets the car to the line with fresh tires and clears all times.</p>
+        <button data-mode="quali" style="background:#8b5cf6">Quali — 12 kg</button>
+        <button data-mode="practice" style="background:#0891b2">Practice — 30 kg</button>
+        <button data-mode="race" style="background:#dc2626">Race — 100 kg</button>
+        <button class="alt" id="mode-cancel">Cancel (Esc)</button>
       </div>
     </div>
     <div class="overlay" id="strategy-overlay">

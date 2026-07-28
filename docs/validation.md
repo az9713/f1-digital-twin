@@ -8,7 +8,7 @@ DRS and ERS deployment are not modeled in the QSS pass (both add pace on straigh
 
 | Quantity | Simulated | Real (OpenF1) | Error |
 |---|---|---|---|
-| Lap time | 82.18 s | 81.745 s | +0.5% |
+| Lap time | 82.98 s | 81.745 s | +1.5% |
 | Top speed | 334 km/h | 333 km/h | 0.3% |
 | Slowest corner | 55 km/h | 74 km/h | -26.2% |
 | Track length (fitted) | 5756 m | 5793 m (official) | -0.6% |
