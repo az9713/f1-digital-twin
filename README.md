@@ -3,7 +3,7 @@
 A real-time, browser-based digital twin of a Formula One car. Every force is computed from
 first principles at 120 Hz and drawn on the car — Pacejka tires with a friction circle,
 a three-node tire thermal network with wear, ride-height-dependent aerodynamics with DRS,
-ERS energy flows — validated against real OpenF1 telemetry to **+0.5 % lap-time error**
+ERS energy flows — validated against real OpenF1 telemetry to **+1.5 % lap-time error**
 at Monza.
 
 **Play it:** https://az9713.github.io/f1-digital-twin/ (or `npm install && npm run dev`)
@@ -45,7 +45,7 @@ racing line with the game's exact vehicle parameters ([docs/validation.md](docs/
 
 | | Simulated | Real | Error |
 |---|---|---|---|
-| Lap time | 82.18 s | 81.745 s | **+0.5 %** |
+| Lap time | 82.98 s | 81.745 s | **+1.5 %** |
 | Top speed | 334 km/h | 333 km/h | +0.3 % |
 | Track length | 5756 m | 5793 m | −0.6 % |
 
@@ -70,7 +70,7 @@ python data/bake_session.py 9590 1 monza-2024   # session_key driver out_name
 - No suspension kinematics yet (camber/toe curves), so no camber term in the tire model
 - Ring thermal is circumferential only (8 nodes), not the spec's 8 × 3 grid
 - Track fitted from the driven racing line; chicane apex curvature is over-tight (−26 % on min speed)
-- DRS is free-toggle at speed rather than zone-gated; braking is ~30 % stronger than real
+- DRS zones are curvature-derived (5 zones / 2468 m) rather than the official Monza 2
 - Strategy sim prices laps analytically instead of AI-driving them
 
 Full v1/v2 specifications in [docs/](docs/).
